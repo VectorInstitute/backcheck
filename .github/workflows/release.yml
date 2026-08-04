@@ -9,13 +9,16 @@ on:
         description: Tag to build binaries for
         required: true
 
+# Least privilege by default; only the job that uploads assets asks for write.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   binaries:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -62,17 +65,27 @@ jobs:
     name: publish to crates.io
     needs: binaries
     runs-on: ubuntu-latest
+    # Only a v* tag can reach this job. The `crates-io` environment additionally restricts
+    # itself to v* tags and requires a reviewer to approve, so the publish token is
+    # unreachable from a branch, a pull request, or a fork.
     if: startsWith(github.ref, 'refs/tags/v')
+    environment: crates-io
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      # Requires a CARGO_REGISTRY_TOKEN secret; skipped automatically when absent.
+
+      # Cargo reads CARGO_REGISTRY_TOKEN from the environment. Passing it as a `--token`
+      # argument instead would expose it in the process list of the runner.
       - name: cargo publish
         env:
-          TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          if [ -z "$TOKEN" ]; then
-            echo "CARGO_REGISTRY_TOKEN not set — skipping publish."
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "No publish token available; skipping."
             exit 0
           fi
-          cargo publish --token "$TOKEN"
+          cargo publish
