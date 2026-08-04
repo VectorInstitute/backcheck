@@ -6,8 +6,8 @@
   <a href="https://github.com/VectorInstitute/backcheck/actions/workflows/ci.yml">
     <img src="https://github.com/VectorInstitute/backcheck/actions/workflows/ci.yml/badge.svg" alt="CI">
   </a>
-  <a href="https://crates.io/crates/backcheck">
-    <img src="https://img.shields.io/crates/v/backcheck.svg" alt="crates.io">
+  <a href="https://github.com/VectorInstitute/backcheck/releases/latest">
+    <img src="https://img.shields.io/github/v/release/VectorInstitute/backcheck?color=10B981" alt="release">
   </a>
   <img src="https://img.shields.io/badge/rust-≥1.85-CE422B.svg" alt="Rust ≥ 1.85">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache 2.0"></a>
@@ -65,19 +65,23 @@ anything. It reads the evidence.
 
 ## Install
 
+One static binary, no runtime dependencies. Prebuilt for macOS (Apple silicon and Intel), Linux,
+and Windows on every [release](https://github.com/VectorInstitute/backcheck/releases):
+
 ```bash
-cargo install backcheck
+curl -sSL https://github.com/VectorInstitute/backcheck/releases/latest/download/backcheck-aarch64-apple-darwin.tar.gz | tar xz
+sudo mv backcheck /usr/local/bin/
 ```
 
-Or build from source:
+From source, with Rust 1.85 or newer:
 
 ```bash
 git clone https://github.com/VectorInstitute/backcheck
 cd backcheck && cargo install --path .
 ```
 
-Prebuilt binaries for macOS and Linux are attached to every
-[release](https://github.com/VectorInstitute/backcheck/releases).
+Homebrew, `npx`, and a `curl | sh` installer are tracked in
+[#10](https://github.com/VectorInstitute/backcheck/issues/10).
 
 ## Use
 
