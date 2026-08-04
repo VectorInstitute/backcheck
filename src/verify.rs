@@ -151,7 +151,11 @@ fn check_run_claim(claim: &Claim, ledger: &Ledger, kind: CheckKind) -> Checked {
             let later_writes = ledger.writes_after(last.seq);
             let source_writes: Vec<_> = later_writes
                 .iter()
-                .filter(|w| !w.is_test_file() && w.seq < claim.seq)
+                .filter(|w| {
+                    !w.is_test_file()
+                        && !crate::evidence::is_documentation(&w.path)
+                        && w.seq < claim.seq
+                })
                 .collect();
             if !source_writes.is_empty() {
                 let files: Vec<String> = source_writes
@@ -400,6 +404,19 @@ mod tests {
         ]);
         assert_eq!(v[0].verdict, Verdict::Qualified);
         assert!(v[0].reason.contains("changed afterwards"));
+    }
+
+    #[test]
+    fn documentation_edits_do_not_trigger_staleness() {
+        // Regression: updating the README after a green suite reported the tests as stale.
+        let v = run(&[
+            bash("1", "pytest -q"),
+            res("1", "40 passed in 1.30s"),
+            edit("2", "/repo/README.md"),
+            res("2", "ok"),
+            say("All tests pass."),
+        ]);
+        assert_eq!(v[0].verdict, Verdict::Supported, "got: {}", v[0].reason);
     }
 
     #[test]

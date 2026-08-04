@@ -96,6 +96,8 @@ fn re(cell: &'static OnceLock<Regex>, pat: &str) -> &'static Regex {
     cell.get_or_init(|| Regex::new(pat).expect("static regex"))
 }
 
+static CLEAN_FAIL: OnceLock<Regex> = OnceLock::new();
+
 /// Split a shell line into segments that each start a fresh command.
 ///
 /// Pipelines are kept intact: `pytest | tail` is one command whose output happens to be filtered.
@@ -370,6 +372,18 @@ fn caveats_for(segment: &str, kind: CheckKind) -> Vec<Caveat> {
     out
 }
 
+/// A subset the runner itself reported, read from its output rather than its arguments.
+fn reported_subset(output: &str) -> Option<Caveat> {
+    static FILTERED: OnceLock<Regex> = OnceLock::new();
+    let n: u32 = re(&FILTERED, r"(\d+) filtered out")
+        .captures(output)
+        .and_then(|c| c[1].parse().ok())?;
+    if n == 0 {
+        return None;
+    }
+    Some(Caveat::SubsetOnly(format!("{n} tests filtered out")))
+}
+
 /// Does the command name specific test files or test ids, rather than a whole suite?
 fn targets_specific_tests(segment: &str) -> Option<Caveat> {
     static RE: OnceLock<Regex> = OnceLock::new();
@@ -508,6 +522,27 @@ fn parse_outcome(
             (Outcome::Unknown, None, None, None)
         }
         "ruff" => {
+            // `ruff check --fix` reports what it found and then what it repaired. "Found 2
+            // errors (2 fixed, 0 remaining)" is a clean result, not a failing one.
+            static FIXED: OnceLock<Regex> = OnceLock::new();
+            if let Some(c) = find(r"\((\d+) fixed, (\d+) remaining\)", &FIXED) {
+                let remaining: u32 = c[2].parse().unwrap_or(1);
+                return if remaining == 0 {
+                    (
+                        Outcome::Passed,
+                        None,
+                        Some(0),
+                        line_containing("remaining)"),
+                    )
+                } else {
+                    (
+                        Outcome::Failed,
+                        None,
+                        Some(remaining),
+                        line_containing("remaining)"),
+                    )
+                };
+            }
             if output.contains("All checks passed") || output.contains("files already formatted") {
                 return (Outcome::Passed, None, Some(0), line_containing("passed"));
             }
@@ -520,7 +555,9 @@ fn parse_outcome(
                     line_containing("found "),
                 );
             }
-            (Outcome::Unknown, None, None, None)
+            // `ruff check -q` prints nothing when it is happy, so callers routinely append
+            // their own marker (`&& echo RUFF CLEAN`). Let the generic reading find it.
+            generic_outcome(output, kind)
         }
         "clippy" | "cargo check" | "cargo build" => {
             static E: OnceLock<Regex> = OnceLock::new();
@@ -529,7 +566,18 @@ fn parse_outcome(
                 return (Outcome::Failed, None, None, line_containing("error"));
             }
             if output.contains("Finished") || output.contains("Compiling") {
-                return (Outcome::Passed, None, Some(0), line_containing("finished"));
+                // Match cargo's own progress line rather than the word "finished", which
+                // also ends a test summary ("... finished in 0.79s") and would cite a test
+                // result as proof that a build succeeded.
+                let ev = output
+                    .lines()
+                    .rev()
+                    .find(|l| {
+                        let t = l.trim_start();
+                        t.starts_with("Finished") || t.starts_with("Compiling")
+                    })
+                    .map(|l| l.trim().to_string());
+                return (Outcome::Passed, None, Some(0), ev);
             }
             (Outcome::Unknown, None, None, None)
         }
@@ -601,8 +649,19 @@ fn parse_outcome(
             }
             generic_outcome(output, kind)
         }
-        "tsc" | "pyright" | "eslint" | "flake8" | "pylint" | "golangci-lint" | "biome"
-        | "format check" | "go build" => generic_outcome(output, kind),
+        "tsc" => {
+            // TypeScript prints nothing when it is happy, and every diagnostic it does emit
+            // carries a TS error code. That makes the absence of a code a reliable pass even
+            // when the surrounding output belongs to another tool in the same chain.
+            static TS: OnceLock<Regex> = OnceLock::new();
+            if re(&TS, r"error TS\d+").is_match(output) {
+                let n = re(&TS, r"error TS\d+").find_iter(output).count() as u32;
+                return (Outcome::Failed, None, Some(n), line_containing("error ts"));
+            }
+            (Outcome::Passed, None, Some(0), None)
+        }
+        "pyright" | "eslint" | "flake8" | "pylint" | "golangci-lint" | "biome" | "format check"
+        | "go build" => generic_outcome(output, kind),
         _ => generic_outcome(output, kind),
     }
 }
@@ -613,6 +672,23 @@ fn generic_outcome(
     kind: CheckKind,
 ) -> (Outcome, Option<u32>, Option<u32>, Option<String>) {
     let lower = output.to_lowercase();
+
+    // A hand-written success marker (`&& echo "RUFF CLEAN"`) is only trustworthy for a
+    // non-test check, where the tool itself is silent on success. A test runner that printed
+    // nothing has not demonstrated anything.
+    if kind != CheckKind::Test {
+        static CLEAN: OnceLock<Regex> = OnceLock::new();
+        if re(&CLEAN, r"(?i)\b(clean|ok|passed|no problems)\b").is_match(&lower)
+            && !re(&CLEAN_FAIL, r"(?i)\b(error|failed|failure|traceback)\b").is_match(&lower)
+        {
+            let ev = output
+                .lines()
+                .rev()
+                .find(|l| !l.trim().is_empty())
+                .map(|l| l.trim().to_string());
+            return (Outcome::Passed, None, Some(0), ev);
+        }
+    }
     let fail_markers = [
         "error:",
         "failed",
@@ -657,6 +733,69 @@ fn generic_outcome(
 }
 
 /// Extract every recognised check run from one Bash command and its output.
+/// The literal text an `echo` segment prints, when it is a plain constant.
+///
+/// Anything interpolated is unusable as a landmark, so `$VAR` and command substitution
+/// disqualify the segment.
+fn echo_literal(segment: &str) -> Option<String> {
+    let rest = segment.trim().strip_prefix("echo ")?.trim();
+    if rest.contains('$') || rest.contains('`') || rest.starts_with('-') {
+        return None;
+    }
+    let lit = rest.trim_matches(|c| c == '"' || c == '\'').trim();
+    if lit.len() < 3 {
+        return None;
+    }
+    Some(lit.to_string())
+}
+
+/// Split a chained command's output into the region produced by each segment.
+///
+/// Agents habitually separate the parts of a chained command with `echo "=== lint ==="`,
+/// which leaves a findable landmark in the combined output. Where those landmarks can be
+/// located, each check is parsed against only the text it actually produced. Without this
+/// every parser sees the whole stream, so a linter's "All checks passed!" can be reported as
+/// the evidence for a claim about tests.
+fn attribute_output<'a>(segments: &[String], output: &'a str) -> Vec<&'a str> {
+    // Locate each echo landmark, scanning forward so repeated markers stay in order.
+    let mut marks: Vec<Option<(usize, usize)>> = vec![None; segments.len()];
+    let mut cursor = 0usize;
+    for (i, seg) in segments.iter().enumerate() {
+        if let Some(lit) = echo_literal(seg) {
+            if let Some(rel) = output.get(cursor..).and_then(|t| t.find(&lit)) {
+                let start = cursor + rel;
+                marks[i] = Some((start, start + lit.len()));
+                cursor = start + lit.len();
+            }
+        }
+    }
+
+    segments
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let start = marks[..i]
+                .iter()
+                .rev()
+                .flatten()
+                .next()
+                .map(|(_, end)| *end)
+                .unwrap_or(0);
+            let end = marks[i + 1..]
+                .iter()
+                .flatten()
+                .next()
+                .map(|(begin, _)| *begin)
+                .unwrap_or(output.len());
+            if start >= end {
+                ""
+            } else {
+                output.get(start..end).unwrap_or(output)
+            }
+        })
+        .collect()
+}
+
 pub fn analyse(
     seq: usize,
     command: &str,
@@ -665,14 +804,26 @@ pub fn analyse(
     is_error: bool,
 ) -> Vec<CheckRun> {
     let mut runs = Vec::new();
-    for segment in split_segments(command) {
+    let segments = split_segments(command);
+    let regions = attribute_output(&segments, output);
+
+    for (idx, segment) in segments.iter().enumerate() {
+        let segment = segment.clone();
+        let region = regions.get(idx).copied().unwrap_or(output);
         let Some((kind, runner)) = classify(&segment) else {
             continue;
         };
         let mut caveats = caveats_for(&segment, kind);
-        caveats.extend(suppression_caveats(command));
         if kind == CheckKind::Test {
             if let Some(c) = targets_specific_tests(&segment) {
+                if !caveats.iter().any(|x| matches!(x, Caveat::SubsetOnly(_))) {
+                    caveats.push(c);
+                }
+            }
+            // Some runners say outright how much of the suite they skipped. cargo prints
+            // "1584 filtered out" when a name filter narrowed the run, which is far more
+            // reliable than inferring a subset from the command line.
+            if let Some(c) = reported_subset(region) {
                 if !caveats.iter().any(|x| matches!(x, Caveat::SubsetOnly(_))) {
                     caveats.push(c);
                 }
@@ -682,10 +833,27 @@ pub fn analyse(
         let (outcome, passed, failed, evidence_line) = if interrupted || is_error {
             (Outcome::DidNotComplete, None, None, None)
         } else {
-            parse_outcome(&runner, kind, output)
+            parse_outcome(&runner, kind, region)
         };
         if outcome == Outcome::Failed && failed == Some(0) && passed == Some(0) {
             caveats.push(Caveat::NoTestsRan);
+        }
+
+        // Caveats about *visibility* only bite when the verdict rested on not seeing a
+        // failure. backcheck reads output rather than exit status, so once a runner has
+        // printed a definitive summary ("40 passed", "✓ built in 1.10s"), a trailing
+        // `|| true` or a `| head` did not hide the answer and saying so is noise.
+        // Caveats about *scope* are different: a subset run really did test less.
+        if evidence_line.is_none() {
+            caveats.extend(suppression_caveats(command));
+        } else {
+            caveats.retain(|c| !matches!(c, Caveat::OutputFiltered(_)));
+        }
+
+        // `-x` and `--maxfail` only cut a run short once something fails. A run that passed
+        // was never truncated by them, so the flag says nothing about coverage.
+        if outcome == Outcome::Passed {
+            caveats.retain(|c| !matches!(c, Caveat::StopsEarly(_)));
         }
 
         runs.push(CheckRun {
@@ -764,6 +932,55 @@ mod tests {
     }
 
     #[test]
+    fn silent_tsc_is_a_pass_and_ts_codes_are_a_failure() {
+        // tsc says nothing on success, so "no output" is the result, not an unreadable one.
+        assert_eq!(one("npx tsc --noEmit", "").outcome, Outcome::Passed);
+        // Another tool's "error" in the same chain must not be read as a type error.
+        let chained = analyse(
+            1,
+            "npx tsc -b && npx eslint src/",
+            "1 error and 0 warnings",
+            false,
+            false,
+        );
+        let ts = chained
+            .iter()
+            .find(|r| r.runner == "tsc")
+            .expect("tsc should be recognised");
+        assert_eq!(ts.outcome, Outcome::Passed);
+        let bad = one(
+            "npx tsc -b",
+            "src/pages/StatusPage.tsx(5,1): error TS6133: 'X' is declared but never read.",
+        );
+        assert_eq!(bad.outcome, Outcome::Failed);
+    }
+
+    #[test]
+    fn ruff_fix_that_repaired_everything_is_a_pass() {
+        // Regression: "Found 1 error (1 fixed, 0 remaining)" was read as a failing lint run
+        // and contradicted an honest "lint passes".
+        let fixed = one(
+            "ruff check --fix src/",
+            "Found 1 error (1 fixed, 0 remaining).",
+        );
+        assert_eq!(fixed.outcome, Outcome::Passed);
+
+        let partial = one(
+            "ruff check --fix src/",
+            "Found 5 errors (2 fixed, 3 remaining).",
+        );
+        assert_eq!(partial.outcome, Outcome::Failed);
+        assert_eq!(partial.failed, Some(3));
+    }
+
+    #[test]
+    fn stops_early_flag_is_moot_when_nothing_failed() {
+        // `pytest -x` that passed ran everything it selected; the flag never fired.
+        let r = one("pytest -x", "74 passed in 0.07s");
+        assert!(r.is_clean_pass(), "unexpected caveats: {:?}", r.caveats);
+    }
+
+    #[test]
     fn mypy_and_ruff() {
         assert_eq!(
             one(
@@ -780,13 +997,35 @@ mod tests {
     }
 
     #[test]
-    fn suppressed_failure_is_caveated() {
-        let r = one("pytest -q || true", "1 passed");
-        assert!(r
+    fn suppressed_failure_is_caveated_only_when_it_could_hide_something() {
+        // No readable summary: `|| true` really could be concealing the outcome.
+        let hidden = one("pytest -q || true", "");
+        assert!(hidden
             .caveats
             .iter()
             .any(|c| matches!(c, Caveat::FailureSuppressed(_))));
-        assert!(!r.is_clean_pass());
+
+        // A definitive summary settles it, and the exit code was never consulted anyway.
+        let shown = one("pytest -q || true", "1 passed in 0.2s");
+        assert!(
+            !shown
+                .caveats
+                .iter()
+                .any(|c| matches!(c, Caveat::FailureSuppressed(_))),
+            "an explicit pass line makes the suppression moot: {:?}",
+            shown.caveats
+        );
+        assert!(shown.is_clean_pass());
+    }
+
+    #[test]
+    fn filtering_is_moot_once_the_summary_survived_it() {
+        // `| tail` and friends only matter if they removed the answer; here they did not.
+        let r = one(
+            "cargo test | head -20",
+            "test result: ok. 65 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1s",
+        );
+        assert!(r.is_clean_pass(), "unexpected caveats: {:?}", r.caveats);
     }
 
     #[test]
@@ -847,6 +1086,89 @@ mod tests {
     fn non_check_commands_are_ignored() {
         assert!(analyse(1, "ls -la", "a\nb", false, false).is_empty());
         assert!(analyse(1, "git status", "clean", false, false).is_empty());
+    }
+
+    #[test]
+    fn a_filtered_cargo_run_is_not_a_whole_suite() {
+        // `cargo test <name>` passing 2 of 1586 tests does not back "the tests pass".
+        let r = one(
+            "cargo test -p dynamo-llm --lib rank_reset",
+            "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1584 filtered out; finished in 0.01s",
+        );
+        assert_eq!(r.outcome, Outcome::Passed);
+        assert!(
+            r.caveats.iter().any(|c| matches!(c, Caveat::SubsetOnly(_))),
+            "1584 filtered out must qualify the pass: {:?}",
+            r.caveats
+        );
+        assert!(!r.is_clean_pass());
+
+        // A full run reports nothing filtered and stays a clean pass.
+        let full = one(
+            "cargo test",
+            "test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1s",
+        );
+        assert!(full.is_clean_pass());
+    }
+
+    #[test]
+    fn build_evidence_is_not_a_test_summary() {
+        // Regression: "finished in 0.79s" inside a test summary was cited as proof a build
+        // succeeded, because the parser searched for the bare word "finished".
+        let r = one(
+            "cargo build",
+            "test result: ok. 190 passed; 0 failed; finished in 0.79s\n    Finished `dev` profile [unoptimized] target(s) in 5.13s",
+        );
+        assert_eq!(r.outcome, Outcome::Passed);
+        let ev = r.evidence_line.unwrap_or_default();
+        assert!(ev.starts_with("Finished"), "cited the wrong line: {ev}");
+    }
+
+    #[test]
+    fn each_check_is_parsed_against_its_own_output() {
+        // Real shape from a session: pytest and ruff chained with an echo landmark between
+        // them. Parsing both against the whole stream made ruff's "All checks passed!" the
+        // evidence for the claim about tests.
+        let runs = analyse(
+            1,
+            "pytest tests/ -q 2>&1 | tail -3; echo \"---RUFF---\"; ruff check src/ tests/",
+            "40 passed in 1.30s\n---RUFF---\nAll checks passed!",
+            false,
+            false,
+        );
+        let test = runs.iter().find(|r| r.kind == CheckKind::Test).unwrap();
+        assert_eq!(test.outcome, Outcome::Passed);
+        assert_eq!(
+            test.evidence_line.as_deref(),
+            Some("40 passed in 1.30s"),
+            "a claim about tests must cite the test runner, not the linter"
+        );
+
+        let lint = runs.iter().find(|r| r.kind == CheckKind::Lint).unwrap();
+        assert_eq!(lint.outcome, Outcome::Passed);
+        assert_eq!(lint.evidence_line.as_deref(), Some("All checks passed!"));
+    }
+
+    #[test]
+    fn reads_a_hand_written_success_marker() {
+        // `ruff check -q` is silent when it passes, so callers add their own marker.
+        let runs = analyse(
+            1,
+            "pytest -q 2>&1 | tail -3; echo \"---RUFF---\"; ruff check src/ -q && echo \"RUFF CLEAN\"",
+            "40 passed in 1.30s\n---RUFF---\nRUFF CLEAN",
+            false,
+            false,
+        );
+        let lint = runs.iter().find(|r| r.kind == CheckKind::Lint).unwrap();
+        assert_eq!(lint.outcome, Outcome::Passed);
+    }
+
+    #[test]
+    fn a_silent_marker_does_not_vouch_for_tests() {
+        // The same trick must not work for a test runner: printing "CLEAN" proves nothing
+        // about a suite that never reported running anything.
+        let runs = analyse(1, "pytest -q && echo CLEAN", "CLEAN", false, false);
+        assert_ne!(runs[0].outcome, Outcome::Passed);
     }
 
     #[test]

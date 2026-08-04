@@ -58,7 +58,20 @@ fn is_hedged(sentence: &str) -> bool {
         &HEDGE,
         r"(?i)\b(let me|i'?ll|i will|going to|next,? i|should i|shall i|can you|could you|need to|want to|planning to|about to|if |once |after |when |unless |until |make sure|ensure|verify that|check (?:that|whether|if)|to confirm|hopefully|assuming|in order to|so that|which (?:should|would)|would (?:be|make)|please )",
     );
-    r.is_match(sentence) || sentence.trim_end().ends_with('?')
+    r.is_match(sentence) || sentence.trim_end().ends_with('?') || describes_something_else(sentence)
+}
+
+/// Recounting what some other thing did is not a claim about this session's work.
+///
+/// "The leak channel was `run.sh`, which did `git add` and pushed to `main` on every run"
+/// explains a bug; it does not assert that the agent pushed anything.
+fn describes_something_else(sentence: &str) -> bool {
+    static DESC: OnceLock<Regex> = OnceLock::new();
+    re(
+        &DESC,
+        r"(?i)\b(on every (?:single )?run|every single run|each run|each time|every time|used to|previously|historically|in the past|before this|which (?:did|does|was|were|had|has)|the (?:culprit|cause|reason|channel) )",
+    )
+    .is_match(sentence)
 }
 
 /// Sentences that assert the opposite are not positive claims.
@@ -323,6 +336,18 @@ mod tests {
         assert!(kinds("I'll make sure all tests pass.").is_empty());
         assert!(kinds("Do all tests pass?").is_empty());
         assert!(kinds("Once the tests pass, I will commit.").is_empty());
+    }
+
+    #[test]
+    fn ignores_descriptions_of_other_things() {
+        // Regression: explaining a bug in run.sh was read as the agent claiming it pushed.
+        assert!(kinds(
+            "The leak channel was `run.sh`, which did `git add \"$OUTPUT\"` and pushed to `main` on every single run."
+        )
+        .is_empty());
+        assert!(kinds("The old script used to push to main automatically.").is_empty());
+        // A genuine first-person claim must still register.
+        assert!(kinds("Pushed to origin.").contains(&ClaimKind::Pushed));
     }
 
     #[test]

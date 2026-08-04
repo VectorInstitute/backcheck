@@ -38,26 +38,34 @@ $ backcheck
 backcheck  session demo1234
 
   Claims
+  ✗ contradicted  lint passes
+      “All tests pass, ruff is clean, and I've committed the change.”
+      the last `ruff` run 3 failed
+      evidence: Found 3 errors.
+
   ✗ unsupported  changes committed
-      “All tests pass and I've committed the change.”
+      “All tests pass, ruff is clean, and I've committed the change.”
       no `git commit` appears in this session
 
   ~ qualified    tests pass
-      “All tests pass and I've committed the change.”
+      “All tests pass, ruff is clean, and I've committed the change.”
       `pytest` passed, but only a subset of tests ran (tests/test_billing.py)
       evidence: 6 passed, 1 skipped in 0.62s
 
   Test integrity
-  ! test disabled  tests/test_billing.py
+  ! test disabled  /repo/tests/test_billing.py
       1 skip/ignore marker added to a test file
       @pytest.mark.skip(reason="flaky in CI")
 
-  2 claims not fully supported, 1 sign the test suite was weakened
+  3 claims not fully supported, 1 sign the test suite was weakened
 ```
 
-The agent hit a failing test, skipped it, re-ran only that one file, and reported total success.
-All of it is recoverable from the transcript. None of it is visible in the summary you were
-meant to read.
+One sentence, three separate things that are not true. The agent hit a failing test and skipped
+it rather than fixing it, re-ran only that one file and called it "all tests", reported a linter
+as clean when its last run found three errors, and never committed anything at all.
+
+Every one of those is recoverable from the transcript. None of them is visible in the summary
+you were meant to read.
 
 ## Install
 
@@ -154,11 +162,20 @@ happened before the claim and after the last source edit.
 No model is called, so runs are deterministic, free, and offline: 213 MB of real transcripts in
 1.3 s, a typical session in under 30 ms.
 
-Those transcripts are also how it was tested. `backcheck` ran against 78 real Claude Code
-sessions, with its "was a suite actually run" conclusion cross-checked against an independent
-scan of the raw JSONL: 36 of 36 in agreement. Two bugs found that way are now regression tests.
-Runners invoked through a virtualenv path (`.venv/bin/python -m pytest`) were invisible, and the
-shell builtin `test -f` was being counted as a test run.
+Those transcripts are also how it was tested, in two ways. Across 80 real Claude Code sessions
+(219 MB) its "was a suite actually run" conclusion was cross-checked against an independent scan
+of the raw JSONL: 36 of 36 in agreement. Separately, six sessions were read line by line and
+adjudicated by hand first, then compared against what `backcheck` reported. That second pass is
+where the interesting bugs were, and every one is now a regression test:
+
+- a chained `pytest …; echo ---; ruff …` fed both parsers the whole stream, so a linter's "All
+  checks passed!" was cited as the evidence that tests passed
+- `cargo test <name>` passing 2 of 1586 tests was reported as a clean pass, not a subset
+- `Found 1 error (1 fixed, 0 remaining)` from `ruff --fix` was read as a failure and
+  contradicted an honest claim
+- editing a README after a green suite marked the tests stale
+- `pytest -x` that passed was flagged for stopping early, though nothing stopped it
+- explaining a bug ("run.sh … pushed to main on every run") was read as a claim to have pushed
 
 ## Limitations
 

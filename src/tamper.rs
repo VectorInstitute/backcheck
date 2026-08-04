@@ -208,17 +208,37 @@ pub fn scan(transcript: &Transcript, ledger: &Ledger) -> Vec<Finding> {
             .cloned()
             .collect();
         if !deleted.is_empty() {
+            // A name that disappears while the file gains tests is a rename or a split, not
+            // a suite being thinned out. Only a drop in the number of tests is worth an alarm.
+            let shrank = new_tests.len() < old_tests.len();
             findings.push(Finding {
-                severity: Severity::Warning,
+                severity: if shrank {
+                    Severity::Warning
+                } else {
+                    Severity::Notice
+                },
                 seq: w.seq,
                 path: w.path.clone(),
-                kind: "test removed",
-                detail: format!(
-                    "{} test case{} deleted: {}",
-                    deleted.len(),
-                    if deleted.len() == 1 { "" } else { "s" },
-                    deleted.join(", ")
-                ),
+                kind: if shrank {
+                    "test removed"
+                } else {
+                    "test renamed"
+                },
+                detail: if shrank {
+                    format!(
+                        "{} test case{} deleted: {}",
+                        deleted.len(),
+                        if deleted.len() == 1 { "" } else { "s" },
+                        deleted.join(", ")
+                    )
+                } else {
+                    format!(
+                        "{} renamed or replaced, and the file still defines {} test{}",
+                        deleted.join(", "),
+                        new_tests.len(),
+                        if new_tests.len() == 1 { "" } else { "s" }
+                    )
+                },
                 snippet: None,
             });
         }
@@ -316,6 +336,21 @@ mod tests {
             "def test_add():\n    add(1,2)",
         );
         assert!(f.iter().any(|f| f.kind == "assertions removed"));
+    }
+
+    #[test]
+    fn a_renamed_test_is_not_a_deleted_one() {
+        // Regression: replacing one test with a differently named one was reported as a
+        // deletion, even though the file still covered the same ground.
+        let f = scan_edit(
+            "tests/test_extractors.py",
+            "def test_extracts_matching_tool():\n    assert extract() is not None",
+            "def test_tool_name_must_appear_in_content():\n    assert extract() is None",
+        );
+        assert!(
+            !f.iter().any(|x| x.severity == Severity::Warning),
+            "a one-for-one rename should not raise an alarm: {f:?}"
+        );
     }
 
     #[test]

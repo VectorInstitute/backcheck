@@ -26,6 +26,37 @@ impl FileWrite {
     }
 }
 
+/// Files whose contents cannot change what a test run would do.
+///
+/// Editing a README after a green suite does not make the suite stale, and saying it does is
+/// exactly the false alarm that gets a hook uninstalled. Configuration and lockfiles are
+/// deliberately absent from this list: those can and do change behaviour.
+pub fn is_documentation(path: &str) -> bool {
+    let p = path.to_lowercase();
+    let name = p.rsplit(['/', '\\']).next().unwrap_or(&p);
+    const DOC_EXT: &[&str] = &[
+        ".md",
+        ".markdown",
+        ".rst",
+        ".txt",
+        ".adoc",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".svg",
+        ".pdf",
+        ".ico",
+        ".webp",
+        ".csv",
+    ];
+    DOC_EXT.iter().any(|e| name.ends_with(e))
+        || matches!(
+            name,
+            "license" | "licence" | "notice" | "authors" | "codeowners" | ".gitignore"
+        )
+}
+
 /// Heuristic: does this path look like a test file?
 pub fn is_test_path(path: &str) -> bool {
     let p = path.to_lowercase();
