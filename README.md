@@ -9,7 +9,7 @@
   <a href="https://crates.io/crates/backcheck">
     <img src="https://img.shields.io/crates/v/backcheck.svg" alt="crates.io">
   </a>
-  <img src="https://img.shields.io/badge/rust-≥1.82-CE422B.svg" alt="Rust ≥ 1.82">
+  <img src="https://img.shields.io/badge/rust-≥1.85-CE422B.svg" alt="Rust ≥ 1.85">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache 2.0"></a>
   <img src="https://img.shields.io/badge/LLM_calls-0-48C0D9.svg" alt="Zero LLM calls">
 </p>

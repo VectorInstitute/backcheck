@@ -6,7 +6,7 @@ trusting the tool.
 
 ## Getting set up
 
-Rust 1.82 or newer is all you need.
+Rust 1.85 or newer is all you need.
 
 ```bash
 git clone https://github.com/VectorInstitute/backcheck

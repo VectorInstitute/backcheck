@@ -194,8 +194,7 @@ fn check_git_claim(claim: &Claim, ledger: &Ledger, kind: GitOpKind, opts: &Optio
     let prior = ledger
         .git_ops
         .iter()
-        .filter(|g| g.kind == kind && g.seq < claim.seq)
-        .next_back();
+        .rfind(|g| g.kind == kind && g.seq < claim.seq);
 
     let mk = |verdict: Verdict, reason: String, evidence: Option<String>| Checked {
         claim: claim.clone(),

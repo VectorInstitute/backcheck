@@ -10,3 +10,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # The MSRV job pins this action to the minimum supported Rust version on purpose.
+      # Bumping it would silently raise the MSRV instead of testing it.
+      - dependency-name: "dtolnay/rust-toolchain"

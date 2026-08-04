@@ -96,7 +96,7 @@ pub fn transcripts_for(cwd: &Path) -> Result<Vec<PathBuf>> {
             Some((m, e.path()))
         })
         .collect();
-    items.sort_by(|a, b| b.0.cmp(&a.0));
+    items.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
     Ok(items.into_iter().map(|(_, p)| p).collect())
 }
 

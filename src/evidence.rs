@@ -166,7 +166,7 @@ impl Ledger {
 
     /// The last run of a given kind, whatever its outcome.
     pub fn last_check(&self, kind: CheckKind) -> Option<&CheckRun> {
-        self.checks.iter().filter(|c| c.kind == kind).next_back()
+        self.checks.iter().rfind(|c| c.kind == kind)
     }
 
     /// All runs of a kind.
@@ -181,8 +181,7 @@ impl Ledger {
     pub fn last_source_write(&self) -> Option<&FileWrite> {
         self.writes
             .iter()
-            .filter(|w| w.succeeded && !w.is_test_file())
-            .next_back()
+            .rfind(|w| w.succeeded && !w.is_test_file())
     }
 
     /// Writes that landed after the given point in the transcript.
@@ -194,7 +193,7 @@ impl Ledger {
     }
 
     pub fn last_git_op(&self, kind: GitOpKind) -> Option<&GitOp> {
-        self.git_ops.iter().filter(|g| g.kind == kind).next_back()
+        self.git_ops.iter().rfind(|g| g.kind == kind)
     }
 
     /// Did any check of this kind actually pass cleanly?
