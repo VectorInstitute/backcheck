@@ -109,6 +109,13 @@ fn is_negated(sentence: &str) -> bool {
     .is_match(&cleaned)
 }
 
+/// Remove inline code spans and emphasis markers from a line of prose.
+fn strip_markup(line: &str) -> String {
+    static CODE: OnceLock<Regex> = OnceLock::new();
+    let without_code = re(&CODE, r"`[^`]*`").replace_all(line, " ");
+    without_code.replace("**", "").replace("__", "")
+}
+
 /// Split prose into sentences.
 ///
 /// Splitting happens only at a full stop that is followed by whitespace or the end of the line,
@@ -132,6 +139,12 @@ fn sentences(text: &str) -> Vec<String> {
         if line.starts_with("    ") || line.starts_with('\t') {
             continue;
         }
+
+        // Strip inline code spans and emphasis before matching. A sentence *about* checking,
+        // quoting `> tsc -b` or **bold** fragments of output, is discussion rather than a
+        // claim, and the markup is what made it read like one.
+        let trimmed = strip_markup(trimmed);
+        let trimmed = trimmed.as_str();
 
         let chars: Vec<char> = trimmed.chars().collect();
         let mut cur = String::new();

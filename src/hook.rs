@@ -71,7 +71,9 @@ fn settings_path(global: bool) -> Result<PathBuf> {
             .context("could not locate your home directory")?;
         Ok(PathBuf::from(home).join(".claude").join("settings.json"))
     } else {
-        Ok(PathBuf::from(".claude").join("settings.json"))
+        // settings.local.json, not settings.json: the latter is the file teams commit, and a
+        // hook pointing at a binary a colleague has not installed fails for them on every turn.
+        Ok(PathBuf::from(".claude").join("settings.local.json"))
     }
 }
 
@@ -100,6 +102,9 @@ pub fn install(global: bool, blocking: bool) -> Result<PathBuf> {
         json!({})
     };
 
+    // Advisory is the default. A hook that interrupts roughly one turn in four gets
+    // uninstalled, and the people who have shipped these gates report that repeated
+    // interruptions teach the model to route around them rather than to verify.
     let command = if blocking {
         "backcheck hook".to_string()
     } else {
@@ -204,7 +209,7 @@ mod tests {
     fn install_preserves_existing_settings() {
         let dir = std::env::temp_dir().join(format!("backcheck-test-{}", std::process::id()));
         std::fs::create_dir_all(dir.join(".claude")).unwrap();
-        let settings = dir.join(".claude").join("settings.json");
+        let settings = dir.join(".claude").join("settings.local.json");
         std::fs::write(
             &settings,
             r#"{"model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"other"}]}]}}"#,

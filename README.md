@@ -9,15 +9,6 @@
   <a href="https://crates.io/crates/backcheck">
     <img src="https://img.shields.io/crates/v/backcheck?color=10B981&label=crates.io" alt="crates.io">
   </a>
-  <a href="https://crates.io/crates/backcheck">
-    <img src="https://img.shields.io/crates/d/backcheck?color=10B981&label=cargo%20installs" alt="cargo installs">
-  </a>
-  <a href="https://github.com/VectorInstitute/backcheck/releases">
-    <img src="https://img.shields.io/github/downloads/VectorInstitute/backcheck/total?color=0EA5E9&label=binary%20downloads" alt="binary downloads">
-  </a>
-  <a href="https://github.com/VectorInstitute/backcheck/blob/main/Cargo.toml">
-    <img src="https://img.shields.io/crates/msrv/backcheck?color=CE422B" alt="minimum supported Rust version">
-  </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-Apache--2.0-64748B.svg" alt="Apache 2.0">
   </a>
@@ -33,14 +24,15 @@ Did it run the tests? Did they pass? Did it commit anything?
 claims against the record of what it actually ran.
 
 ```console
-$ backcheck
+$ backcheck demo
 
 backcheck  session demo1234
+  a recorded session (backcheck demo)
 
   Claims
-  ✗ contradicted  lint passes
+  ✗ unsupported  lint passes
       “All tests pass, ruff is clean, and I've committed the change.”
-      the last `ruff` run 3 failed
+      the last `ruff` run reported 3 failed; 1 file was changed after it and it was never re-run
       evidence: Found 3 errors.
 
   ✗ unsupported  changes committed
@@ -75,16 +67,27 @@ curl -fsSL https://raw.githubusercontent.com/VectorInstitute/backcheck/main/inst
 
 Puts a single binary in `~/.local/bin`. No sudo, no runtime dependencies.
 
-With a Rust toolchain, `cargo install backcheck` does the same. Prebuilt binaries for macOS,
-Linux, and Windows are on the [releases page](https://github.com/VectorInstitute/backcheck/releases/latest).
+With a Rust toolchain, `cargo install backcheck` does the same. Prebuilt binaries for macOS
+(Apple silicon and Intel), Linux x86-64, and Windows x86-64 are on the
+[releases page](https://github.com/VectorInstitute/backcheck/releases/latest). Linux arm64 is
+not built yet, so build from source there.
 
 ## Try it
 
-Nothing to configure. In any project where you have used Claude Code:
+See it work on a recorded session, with nothing of yours involved:
+
+```bash
+backcheck demo
+```
+
+Then, in any project where you have used Claude Code:
 
 ```bash
 backcheck
 ```
+
+Most sessions make no checkable claim, and on those it says so and exits 0. It speaks up only
+when something in the agent's summary is not backed by the transcript.
 
 It reads your most recent session and reports what it could and could not verify. Exit code is
 `1` when something does not hold up, so it drops into a pipeline unchanged.
@@ -107,9 +110,17 @@ backcheck install --global   # everywhere
 ```
 
 As a [Stop hook](https://code.claude.com/docs/en/hooks), `backcheck` inspects the transcript the
-moment Claude finishes. When a claim is not supported it blocks completion and hands back the
-reasons, so the agent has to run what it said it ran or correct its summary before the turn
-ends. Use `--no-block` to report without blocking, and `backcheck uninstall` to remove it.
+moment Claude finishes and reports what it could not verify. It writes to
+`.claude/settings.local.json`, so a teammate without the binary installed is unaffected.
+
+It does not interrupt the turn by default. Add `--block` once you trust its verdicts, and the
+agent will be asked to run what it said it ran before finishing:
+
+```bash
+backcheck install --block
+```
+
+`backcheck uninstall` removes it.
 
 ```bash
 backcheck --explain  # show what it recognised, and what ran that it did not
@@ -234,12 +245,13 @@ runner (pytest's `1 failed, 47 passed`, cargo's `test result: FAILED`, jest's `T
 and returns *inconclusive* rather than guessing. Ordering matters too: a pass counts only if it
 happened before the claim and after the last source edit.
 
-No model is called, so runs are deterministic, free, and offline: 213 MB of real transcripts in
-1.3 s, a typical session in under 30 ms.
+No model is called, so runs are deterministic, free, and offline: 221 MB of real transcripts in
+1.6 s, a typical session in under 30 ms.
 
-Those transcripts are also how it was tested, in two ways. Across 80 real Claude Code sessions
-(219 MB) its "was a suite actually run" conclusion was cross-checked against an independent scan
-of the raw JSONL: 36 of 36 in agreement. Separately, a dozen sessions were read line by line and
+Those transcripts are also how it was tested, in two ways. Across 81 real Claude Code sessions
+(221 MB), every session that made a "tests pass" claim had that conclusion cross-checked against
+an independent scan of the raw JSONL: 36 such claims, 36 in agreement. The other sessions made
+no claim of that kind to check. Separately, a dozen sessions were read line by line and
 adjudicated by hand first, then compared against what `backcheck` reported. That second pass is
 where the interesting bugs were, and all of them are now regression tests. A sample:
 
@@ -254,6 +266,23 @@ where the interesting bugs were, and all of them are now regression tests. A sam
   the problem had been fixed
 - "Test of Time → green gradient banner" was read as a passing suite, and "pushed the last item
   over" as a `git push`
+
+## Prior art
+
+Several people arrived at the same idea independently, and their work is worth knowing about:
+[llm-dark-patterns](https://github.com/waitdeadai/llm-dark-patterns) and
+[no-vibes](https://github.com/waitdeadai/no-vibes), which benchmark a set of deterministic Stop
+hooks; [grounded](https://github.com/hyde0395/grounded), which blocks edits to files the agent
+never read; and [claude-verify-before-stop](https://github.com/ianymu/claude-verify-before-stop).
+
+They share this project's central rule, and it is worth stating plainly: **no model sits in the
+verdict path.** A model that produced a dishonest summary cannot be trusted to grade it, and an
+LLM judge brings the same completion bias to the review.
+
+Those tools are live gates that match on the closing message as it is written. `backcheck` reads
+the finished transcript instead, which is what lets it compare a claim against runs from earlier
+turns, notice that a test file changed after the last green run, and audit sessions that ended
+days ago.
 
 ## Limitations
 

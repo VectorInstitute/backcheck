@@ -65,10 +65,12 @@ enum Command {
         /// Install for every project (~/.claude/settings.json) instead of this one.
         #[arg(long)]
         global: bool,
-        /// Report findings without blocking the turn.
+        /// Block the turn when a claim is not supported, instead of only reporting.
         #[arg(long)]
-        no_block: bool,
+        block: bool,
     },
+    /// Show a worked example on a recorded session, with nothing of yours involved.
+    Demo,
     /// Check this project's recent sessions, not just the last one.
     History {
         /// How many of the most recent sessions to read.
@@ -97,15 +99,15 @@ fn main() -> ExitCode {
 fn run(cli: &Cli) -> Result<ExitCode> {
     match &cli.command {
         Some(Command::Hook { no_block }) => run_hook(cli, *no_block),
-        Some(Command::Install { global, no_block }) => {
-            let path = hook::install(*global, !*no_block)?;
+        Some(Command::Install { global, block }) => {
+            let path = hook::install(*global, *block)?;
             println!("backcheck installed as a Stop hook in {}", path.display());
             println!(
                 "{}",
-                if *no_block {
-                    "It will report unverified claims without blocking."
-                } else {
+                if *block {
                     "When a claim is not supported, Claude will be asked to resolve it before finishing."
+                } else {
+                    "It will report what it could not verify, without interrupting the turn.\nRun `backcheck install --block` if you would rather it stop and ask."
                 }
             );
             println!(
@@ -121,6 +123,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
             }
             Ok(ExitCode::SUCCESS)
         }
+        Some(Command::Demo) => run_demo(cli),
         Some(Command::History { limit }) => run_history(cli, *limit),
         Some(Command::Check { any_project }) => run_check(cli, *any_project),
         None => run_check(cli, false),
@@ -170,6 +173,38 @@ fn run_check(cli: &Cli, any_project: bool) -> Result<ExitCode> {
     } else {
         ExitCode::SUCCESS
     })
+}
+
+/// A worked example, so the tool can be judged before it is trusted with anything real.
+///
+/// The transcript is compiled in rather than read from disk: `cargo install` strips the test
+/// fixtures from the published crate, and a demo that only works from a git checkout is not a
+/// demo.
+fn run_demo(cli: &Cli) -> Result<ExitCode> {
+    const DEMO: &str = include_str!("../tests/fixtures/demo.jsonl");
+    let transcript = backcheck::transcript::Transcript::parse_str(DEMO);
+    let report = backcheck::analyse(
+        &transcript,
+        "a recorded session (backcheck demo)".to_string(),
+        &verify::Options::default(),
+    );
+
+    if cli.json {
+        println!("{}", report::to_json(&report));
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    print!(
+        "{}",
+        report::to_terminal(&report, use_color(cli), cli.verbose)
+    );
+    if cli.explain {
+        print!("{}", report::to_explanation(&report, use_color(cli)));
+    }
+    println!(
+        "  In that session the agent hit a failing test, skipped it, re-ran only that one file,\n  and reported success. Run `backcheck` in your own project to check your last session.\n"
+    );
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Read the project's recent sessions and report only the ones with something to show.

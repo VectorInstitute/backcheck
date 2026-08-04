@@ -294,14 +294,21 @@ pub fn to_terminal(r: &Report, color: bool, verbose: bool) -> String {
     out.push_str(&st.dim(&format!("  {}\n\n", r.transcript)));
 
     if r.checked.is_empty() && r.findings.is_empty() {
-        // A dead end is a poor first impression, and it is usually not the whole story: the
-        // newest session is often an honest one while something earlier is worth seeing.
-        out.push_str(&st.dim("  This session made no claim backcheck can check.\n"));
+        // Four in ten first runs land here. Left bare it reads as a failure, and it is
+        // ambiguous between "the agent claimed nothing", "the phrasing was not recognised",
+        // and "the wrong session was read". Say which, and offer somewhere to go next.
+        out.push_str("  Nothing to check: this session made no claim like \"tests pass\".\n");
         out.push_str(
-            &st.dim(
-                "  Try `backcheck history` to read this project's recent sessions instead.\n\n",
-            ),
+            &st.dim("  That is a normal result. Most sessions make no claim worth verifying.\n\n"),
         );
+        out.push_str(&format!(
+            "  {}     backcheck demo\n",
+            st.bold("See it working:")
+        ));
+        out.push_str(&format!(
+            "  {}  backcheck history\n\n",
+            st.bold("Read this project:")
+        ));
         return out;
     }
 

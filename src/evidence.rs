@@ -58,9 +58,23 @@ pub fn is_documentation(path: &str) -> bool {
 }
 
 /// Heuristic: does this path look like a test file?
+///
+/// The extension check matters more than it looks. Without it, every fixture, snapshot and
+/// golden file under `tests/` counts as test source, and the tamper detector starts reporting
+/// data files as disabled tests. backcheck was doing exactly that to its own JSONL fixtures.
 pub fn is_test_path(path: &str) -> bool {
     let p = path.to_lowercase();
     let name = p.rsplit(['/', '\\']).next().unwrap_or(&p);
+
+    const SOURCE_EXT: &[&str] = &[
+        ".py", ".rs", ".go", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rb", ".java", ".php",
+        ".cs", ".kt", ".kts", ".swift", ".scala", ".c", ".cc", ".cpp", ".h", ".hpp", ".ex", ".exs",
+        ".dart", ".lua", ".sh", ".bash",
+    ];
+    if !SOURCE_EXT.iter().any(|e| name.ends_with(e)) {
+        return false;
+    }
+
     name.starts_with("test_")
         || name.ends_with("_test.py")
         || name.ends_with("_test.go")
