@@ -6,11 +6,17 @@
   <a href="https://github.com/VectorInstitute/backcheck/actions/workflows/ci.yml">
     <img src="https://github.com/VectorInstitute/backcheck/actions/workflows/ci.yml/badge.svg" alt="CI">
   </a>
-  <a href="https://github.com/VectorInstitute/backcheck/releases/latest">
-    <img src="https://img.shields.io/github/v/release/VectorInstitute/backcheck?color=10B981&label=release" alt="latest release">
+  <a href="https://crates.io/crates/backcheck">
+    <img src="https://img.shields.io/crates/v/backcheck?color=10B981&label=crates.io" alt="crates.io">
+  </a>
+  <a href="https://crates.io/crates/backcheck">
+    <img src="https://img.shields.io/crates/d/backcheck?color=10B981&label=cargo%20installs" alt="cargo installs">
   </a>
   <a href="https://github.com/VectorInstitute/backcheck/releases">
-    <img src="https://img.shields.io/github/downloads/VectorInstitute/backcheck/total?color=0EA5E9&label=downloads" alt="downloads">
+    <img src="https://img.shields.io/github/downloads/VectorInstitute/backcheck/total?color=0EA5E9&label=binary%20downloads" alt="binary downloads">
+  </a>
+  <a href="https://github.com/VectorInstitute/backcheck/blob/main/Cargo.toml">
+    <img src="https://img.shields.io/crates/msrv/backcheck?color=CE422B" alt="minimum supported Rust version">
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-Apache--2.0-64748B.svg" alt="Apache 2.0">
@@ -59,9 +65,10 @@ meant to read.
 curl -fsSL https://raw.githubusercontent.com/VectorInstitute/backcheck/main/install.sh | sh
 ```
 
-Installs a single binary to `~/.local/bin`. No sudo, no runtime dependencies. Also available
-via `cargo install backcheck`, as a [prebuilt binary](https://github.com/VectorInstitute/backcheck/releases/latest)
-for macOS, Linux, and Windows, or from source with `cargo install --path .`.
+Puts a single binary in `~/.local/bin`. No sudo, no runtime dependencies.
+
+With a Rust toolchain, `cargo install backcheck` does the same. Prebuilt binaries for macOS,
+Linux, and Windows are on the [releases page](https://github.com/VectorInstitute/backcheck/releases/latest).
 
 ## Try it
 
