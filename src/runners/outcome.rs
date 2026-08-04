@@ -375,7 +375,14 @@ pub(crate) fn parse_outcome(
                 let n = re(&TS, r"error TS\d+").find_iter(output).count() as u32;
                 return (Outcome::Failed, None, Some(n), line_containing("error ts"));
             }
-            (Outcome::Passed, None, Some(0), None)
+            // Silence is the result, so say so. Leaving the evidence empty made the run look
+            // unproven, and a `| head` on the command then qualified an honest claim.
+            (
+                Outcome::Passed,
+                None,
+                Some(0),
+                Some("tsc reported no diagnostics".to_string()),
+            )
         }
         "pyright" | "eslint" | "flake8" | "pylint" | "golangci-lint" | "biome" | "format check"
         | "go build" => generic_outcome(output, kind, exclusive),

@@ -65,10 +65,11 @@ pub fn verify(claims: &[Claim], ledger: &Ledger, opts: &Options) -> Vec<Checked>
     claims
         .iter()
         .map(|c| match c.kind {
-            ClaimKind::TestsPass => check_run_claim(c, ledger, CheckKind::Test),
-            ClaimKind::TypeCheckPasses => check_run_claim(c, ledger, CheckKind::TypeCheck),
-            ClaimKind::LintPasses => check_run_claim(c, ledger, CheckKind::Lint),
-            ClaimKind::BuildPasses => check_run_claim(c, ledger, CheckKind::Build),
+            ClaimKind::TestsPass => check_run_claim(c, ledger, Some(CheckKind::Test)),
+            ClaimKind::ChecksPass => check_run_claim(c, ledger, None),
+            ClaimKind::TypeCheckPasses => check_run_claim(c, ledger, Some(CheckKind::TypeCheck)),
+            ClaimKind::LintPasses => check_run_claim(c, ledger, Some(CheckKind::Lint)),
+            ClaimKind::BuildPasses => check_run_claim(c, ledger, Some(CheckKind::Build)),
             ClaimKind::Committed => check_git_claim(c, ledger, GitOpKind::Commit, opts),
             ClaimKind::Pushed => check_git_claim(c, ledger, GitOpKind::Push, opts),
             ClaimKind::FileWritten => check_file_claim(c, ledger, opts),
@@ -77,13 +78,21 @@ pub fn verify(claims: &[Claim], ledger: &Ledger, opts: &Options) -> Vec<Checked>
 }
 
 /// Verify a "the checks pass" claim against the runs recorded before it was made.
-fn check_run_claim(claim: &Claim, ledger: &Ledger, kind: CheckKind) -> Checked {
-    // Only evidence that predates the claim can support it.
-    let prior: Vec<&CheckRun> = ledger
-        .checks_of(kind)
-        .into_iter()
-        .filter(|r| r.seq < claim.seq)
-        .collect();
+fn check_run_claim(claim: &Claim, ledger: &Ledger, kind: Option<CheckKind>) -> Checked {
+    // `None` means the claim named no particular tool ("all checks pass"), so anything that
+    // ran counts. Saying "no test run appears" to someone who never mentioned tests, and whose
+    // linter did run, is both wrong and confusing.
+    let label = match kind {
+        Some(k) => k.label(),
+        None => "check",
+    };
+    let prior: Vec<&CheckRun> = match kind {
+        Some(k) => ledger.checks_of(k),
+        None => ledger.checks.iter().collect(),
+    }
+    .into_iter()
+    .filter(|r| r.seq < claim.seq)
+    .collect();
 
     let mk = |verdict: Verdict, reason: String, evidence: Option<String>| Checked {
         claim: claim.clone(),
@@ -95,10 +104,7 @@ fn check_run_claim(claim: &Claim, ledger: &Ledger, kind: CheckKind) -> Checked {
     let Some(last) = prior.last().copied() else {
         return mk(
             Verdict::Unsupported,
-            format!(
-                "no {} run appears anywhere in this session before the claim was made",
-                kind.label()
-            ),
+            format!("no {label} run appears anywhere in this session before the claim was made"),
             None,
         );
     };

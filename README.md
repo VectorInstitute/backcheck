@@ -129,6 +129,7 @@ know yet, and it will say so:
 | Claim | Verified against |
 |---|---|
 | tests pass | test-runner output recorded in the session |
+| all checks pass | whatever ran, since the phrase names no particular tool |
 | type check, lint, or build passes | the corresponding tool's output |
 | changes committed or pushed | `git` invocations and what they printed |
 | file created or written | `Write`/`Edit` calls, and the filesystem with `--live` |

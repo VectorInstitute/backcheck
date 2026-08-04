@@ -12,6 +12,8 @@ use crate::transcript::Transcript;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClaimKind {
     TestsPass,
+    /// "all checks pass": a blanket claim naming no particular tool.
+    ChecksPass,
     TypeCheckPasses,
     LintPasses,
     BuildPasses,
@@ -24,6 +26,7 @@ impl ClaimKind {
     pub fn label(&self) -> &'static str {
         match self {
             ClaimKind::TestsPass => "tests pass",
+            ClaimKind::ChecksPass => "checks pass",
             ClaimKind::TypeCheckPasses => "type check passes",
             ClaimKind::LintPasses => "lint passes",
             ClaimKind::BuildPasses => "build succeeds",
@@ -166,6 +169,7 @@ fn all_patterns() -> Vec<Pattern> {
     static TYPES: OnceLock<Regex> = OnceLock::new();
     static LINT: OnceLock<Regex> = OnceLock::new();
     static BUILD: OnceLock<Regex> = OnceLock::new();
+    static CHECKS: OnceLock<Regex> = OnceLock::new();
     static COMMIT: OnceLock<Regex> = OnceLock::new();
     static PUSH: OnceLock<Regex> = OnceLock::new();
 
@@ -177,6 +181,13 @@ fn all_patterns() -> Vec<Pattern> {
             // "Test of Time" rendered with a "green gradient banner" is not a passing suite.
             regex: r"(?i)\b(?:all |the |\d+ )*tests?(?: suite)?\b[^.]{0,30}\b(pass(?:es|ed|ing)?|succeed(?:s|ed)?)\b|\b(?:tests?|test suite|suite|build|ci)\b\s*(?:is|are|all|now|still|were)?\s*green\b|\ball green\b",
             cell: &TESTS,
+        },
+        Pattern {
+            kind: ClaimKind::ChecksPass,
+            // Deliberately vague on purpose: "checks" may mean tests, lint, types, CI or all
+            // of them, so this is verified against whatever ran rather than against one tool.
+            regex: r"(?i)\ball (?:the )?checks?\b[^.]{0,20}\bpass(?:es|ed|ing)?\b|\beverything (?:is |was )?green\b|\ball green\b",
+            cell: &CHECKS,
         },
         Pattern {
             kind: ClaimKind::TypeCheckPasses,
@@ -349,6 +360,20 @@ mod tests {
         assert!(kinds("I'll make sure all tests pass.").is_empty());
         assert!(kinds("Do all tests pass?").is_empty());
         assert!(kinds("Once the tests pass, I will commit.").is_empty());
+    }
+
+    #[test]
+    fn recognises_all_checks_pass() {
+        // Seen verbatim in two separate sessions and extracted from neither. They name no
+        // particular tool, so they get their own kind and are checked against whatever ran.
+        assert!(kinds("All checks pass.").contains(&ClaimKind::ChecksPass));
+        assert!(
+            kinds("All checks pass (369 tests, ruff, mypy, pre-commit).")
+                .contains(&ClaimKind::ChecksPass)
+        );
+        assert!(kinds("Everything is green.").contains(&ClaimKind::ChecksPass));
+        // Still not a claim when it is something the agent intends to do.
+        assert!(kinds("I'll merge once all checks pass.").is_empty());
     }
 
     #[test]
