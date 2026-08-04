@@ -1,132 +1,131 @@
-<svg width="800" height="180" viewBox="0 0 800 180" xmlns="http://www.w3.org/2000/svg">
+<svg width="730" height="190" viewBox="0 0 730 190" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <!--
-      Vector brand palette:
-        magenta   #EB088A   (primary — the unsupported claim)
-        cobalt    #313CFF
-        violet    #8A25C9
-        turquoise #48C0D9   (verified evidence)
+      Palette: the verdict colours backcheck actually prints.
 
-      Concept: the check mark is what the agent *claimed*. Below it runs the session
-      transcript, and the tracer sweeps it right-to-left — backwards — because the claim
-      is made at the end and the proof has to be found behind it. One node is magenta:
-      the step the claim rests on that nothing actually supports.
+        emerald #10B981   supported   evidence backs the claim
+        amber   #F59E0B   qualified   a real pass that does not mean what was claimed
+        red     #EF4444   unsupported nothing backs it
+        slate   #64748B   the transcript itself
+
+      All four are mid-tone, so they hold up on a light and a dark README alike.
+
+      Concept: the check mark is the claim. It is drawn in emerald only as far as the
+      evidence reaches, then turns amber and finally red where it outruns the record.
+      Below it the session runs left to right, and the tracer sweeps it right to left,
+      the direction backcheck reads: the claim comes last, the proof is behind it.
     -->
 
-    <!-- The claim: a check mark -->
-    <path id="check" d="M72,86 L104,122 L188,36"/>
+    <path id="check" d="M74,88 L108,126 L196,34"/>
+    <path id="timeline" d="M276,156 L58,156"/>
 
-    <!-- The transcript: a timeline scanned in reverse -->
-    <path id="timeline" d="M268,150 L56,150"/>
+    <!--
+      Stops sit where they do for a reason: the short descending stroke and the start of
+      the rise are green, the doubt begins past the midpoint, and only the tip is red.
+    -->
+    <linearGradient id="claim" x1="74" y1="126" x2="196" y2="34" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#10B981"/>
+      <stop offset="46%"  stop-color="#10B981"/>
+      <stop offset="68%"  stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#EF4444"/>
+    </linearGradient>
 
-    <radialGradient id="glowbg" cx="150" cy="90" r="165" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#EB088A" stop-opacity="0.09"/>
-      <stop offset="100%" stop-color="#EB088A" stop-opacity="0"/>
+    <linearGradient id="word" x1="352" y1="0" x2="672" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#10B981"/>
+      <stop offset="62%"  stop-color="#0EA5A5"/>
+      <stop offset="100%" stop-color="#0EA5E9"/>
+    </linearGradient>
+
+    <radialGradient id="ambient" cx="150" cy="92" r="170" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#10B981" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#10B981" stop-opacity="0"/>
     </radialGradient>
 
-    <!-- Check gradient: resolves magenta → violet → cobalt as it rises -->
-    <linearGradient id="checkg" x1="72" y1="122" x2="188" y2="36" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#EB088A"/>
-      <stop offset="52%"  stop-color="#8A25C9"/>
-      <stop offset="100%" stop-color="#313CFF"/>
-    </linearGradient>
-
-    <linearGradient id="tg" x1="345" y1="0" x2="710" y2="0" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#EB088A"/>
-      <stop offset="100%" stop-color="#313CFF"/>
-    </linearGradient>
-
     <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="3.5" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
 
-    <filter id="softglow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="1.8" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="1.6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
 
-    <filter id="tracerglow" x="-200%" y="-200%" width="500%" height="500%">
-      <feGaussianBlur stdDeviation="5" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <filter id="tracer" x="-300%" y="-300%" width="700%" height="700%">
+      <feGaussianBlur stdDeviation="4.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
 
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@500;800&amp;display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&amp;display=swap');
     </style>
   </defs>
 
-  <rect width="800" height="180" rx="16" fill="url(#glowbg)"/>
+  <rect width="730" height="190" rx="16" fill="url(#ambient)"/>
 
   <!-- ── The claim ──────────────────────────────────────────────────── -->
 
-  <!-- Ghost echo: the claim before it has been checked -->
-  <use href="#check" stroke="url(#checkg)" stroke-width="14" fill="none"
-       stroke-linecap="round" stroke-linejoin="round" opacity="0.13"/>
+  <use href="#check" stroke="url(#claim)" stroke-width="15" fill="none"
+       stroke-linecap="round" stroke-linejoin="round" opacity="0.14"/>
 
-  <!-- The check itself -->
-  <use href="#check" stroke="url(#checkg)" stroke-width="13" fill="none"
-       stroke-linecap="round" stroke-linejoin="round"
-       filter="url(#glow)" opacity="0.95"/>
+  <use href="#check" stroke="url(#claim)" stroke-width="13.5" fill="none"
+       stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
 
-  <!--
-    The tip is drawn again in magenta and pulses: the part of the claim that
-    outruns its evidence.
-  -->
-  <path d="M170,53 L188,36" stroke="#EB088A" stroke-width="13" fill="none"
+  <!-- The unsupported tip, pulsing so the eye lands on the part that is not backed -->
+  <path d="M178,52 L196,34" stroke="#EF4444" stroke-width="13.5" fill="none"
         stroke-linecap="round" filter="url(#glow)">
-    <animate attributeName="opacity" values="0;0.95;0" dur="3.2s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.15;1;0.15" dur="3s" repeatCount="indefinite"/>
   </path>
 
-  <!-- Link from the flagged step up to the claim it was supposed to support -->
-  <path d="M152,142 L180,52" stroke="#EB088A" stroke-width="1.4" fill="none"
-        stroke-dasharray="3 5" opacity="0.5"/>
+  <!-- What that part of the claim was supposed to rest on -->
+  <path d="M152,148 L186,50" stroke="#EF4444" stroke-width="1.5" fill="none"
+        stroke-dasharray="3 6" opacity="0.55"/>
 
   <!-- ── The transcript, read backwards ─────────────────────────────── -->
 
-  <use href="#timeline" stroke="#48C0D9" stroke-width="1.8" fill="none"
-       stroke-linecap="round" opacity="0.5"/>
+  <use href="#timeline" stroke="#64748B" stroke-width="2" fill="none"
+       stroke-linecap="round" opacity="0.55"/>
 
-  <!-- Arrowhead pointing back through the session -->
-  <polyline points="66,143 55,150 66,157" fill="none" stroke="#48C0D9"
-            stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
-            opacity="0.85"/>
+  <polyline points="69,148 58,156 69,164" fill="none" stroke="#64748B"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
 
-  <!-- Verified steps -->
-  <circle cx="84"  cy="150" r="3.2" fill="#48C0D9" filter="url(#softglow)" opacity="0.8"/>
-  <circle cx="116" cy="150" r="3.2" fill="#313CFF" filter="url(#softglow)" opacity="0.8"/>
-  <circle cx="188" cy="150" r="3.2" fill="#48C0D9" filter="url(#softglow)" opacity="0.8"/>
-  <circle cx="222" cy="150" r="3.2" fill="#8A25C9" filter="url(#softglow)" opacity="0.8"/>
-  <circle cx="256" cy="150" r="3.2" fill="#48C0D9" filter="url(#softglow)" opacity="0.8"/>
+  <!-- Steps the evidence covers -->
+  <circle cx="86"  cy="156" r="3.4" fill="#10B981" filter="url(#soft)" opacity="0.9"/>
+  <circle cx="119" cy="156" r="3.4" fill="#10B981" filter="url(#soft)" opacity="0.9"/>
+  <circle cx="196" cy="156" r="3.4" fill="#10B981" filter="url(#soft)" opacity="0.9"/>
+  <circle cx="229" cy="156" r="3.4" fill="#F59E0B" filter="url(#soft)" opacity="0.9"/>
+  <circle cx="262" cy="156" r="3.4" fill="#10B981" filter="url(#soft)" opacity="0.9"/>
 
-  <!-- The unsupported step -->
-  <circle cx="152" cy="150" r="10" fill="none" stroke="#EB088A" stroke-width="1.4">
-    <animate attributeName="r"       values="7;15;7"      dur="2.4s" repeatCount="indefinite"/>
-    <animate attributeName="opacity" values="0.7;0;0.7"   dur="2.4s" repeatCount="indefinite"/>
+  <!-- The step nothing supports -->
+  <circle cx="152" cy="156" r="9" fill="none" stroke="#EF4444" stroke-width="1.5">
+    <animate attributeName="r"       values="7;16;7"    dur="2.6s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.75;0;0.75" dur="2.6s" repeatCount="indefinite"/>
   </circle>
-  <circle cx="152" cy="150" r="5" fill="#EB088A" filter="url(#glow)">
-    <animate attributeName="opacity" values="1;0.4;1" dur="2.4s" repeatCount="indefinite"/>
+  <circle cx="152" cy="156" r="5" fill="#EF4444" filter="url(#glow)">
+    <animate attributeName="opacity" values="1;0.45;1" dur="2.6s" repeatCount="indefinite"/>
   </circle>
 
-  <!-- Tracer: sweeps right to left, the direction backcheck actually reads -->
-  <circle r="4.5" fill="#48C0D9" filter="url(#tracerglow)">
-    <animateMotion dur="3.6s" repeatCount="indefinite" rotate="none">
+  <circle r="4.2" fill="#38BDF8" filter="url(#tracer)">
+    <animateMotion dur="3.8s" repeatCount="indefinite" rotate="none">
       <mpath href="#timeline"/>
     </animateMotion>
-    <animate attributeName="opacity"
-             values="0;0.9;0.9;0.9;0"
-             keyTimes="0;0.07;0.5;0.88;1"
-             dur="3.6s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0;0.95;0.95;0.95;0"
+             keyTimes="0;0.07;0.5;0.88;1" dur="3.8s" repeatCount="indefinite"/>
   </circle>
 
   <!-- ── Wordmark ───────────────────────────────────────────────────── -->
-  <text x="345" y="112"
-        font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
-        font-size="72" font-weight="800" letter-spacing="-3.5"
-        fill="url(#tg)">backcheck</text>
+  <!--
+    Monospace, because the whole tool lives in a terminal. The stack falls back to the
+    system's UI monospace wherever the webfont cannot load, which is most of the time on
+    GitHub, and the design assumes that rather than fighting it.
+  -->
+  <text x="352" y="112"
+        font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace"
+        font-size="60" font-weight="700" letter-spacing="-2.5"
+        fill="url(#word)">backcheck</text>
 
-  <text x="347" y="142"
-        font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
-        font-size="12.5" font-weight="500" letter-spacing="3.2"
-        fill="#4a4a6a">verify what your agent actually did</text>
+  <text x="355" y="142"
+        font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace"
+        font-size="12.5" font-weight="400" letter-spacing="1.6"
+        fill="#64748B">verify what your agent actually did</text>
 </svg>
