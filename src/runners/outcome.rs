@@ -174,6 +174,22 @@ pub(crate) fn parse_outcome(
             // their own marker (`&& echo RUFF CLEAN`). Let the generic reading find it.
             generic_outcome(output, kind, exclusive)
         }
+        "shellcheck" => {
+            if output.trim().is_empty() {
+                return (Outcome::Passed, None, Some(0), None);
+            }
+            static DIAGNOSTIC: OnceLock<Regex> = OnceLock::new();
+            let diagnostic = re(&DIAGNOSTIC, r"\bSC\d{4}\b");
+            if diagnostic.is_match(output) {
+                let evidence = output
+                    .lines()
+                    .rev()
+                    .find(|line| diagnostic.is_match(line))
+                    .map(|line| line.trim().to_string());
+                return (Outcome::Failed, None, None, evidence);
+            }
+            (Outcome::Unknown, None, None, None)
+        }
         "clippy" | "cargo check" | "cargo build" => {
             static E: OnceLock<Regex> = OnceLock::new();
             if let Some(c) = find(r"error(?:\[E\d+\])?:", &E) {

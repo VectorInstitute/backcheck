@@ -97,6 +97,7 @@ pub fn classify(segment: &str) -> Option<(CheckKind, String)> {
         ("pylint", "pylint"),
         ("golangci-lint", "golangci-lint"),
         ("biome", "biome"),
+        ("shellcheck", "shellcheck"),
     ] {
         if head == needle {
             return Some((CheckKind::Lint, name.to_string()));
