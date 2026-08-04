@@ -299,6 +299,22 @@ pub fn classify(segment: &str) -> Option<(CheckKind, String)> {
     if lower.starts_with("npm run build") || lower.starts_with("run build") {
         return Some((CheckKind::Build, "npm build".into()));
     }
+    if lower.starts_with("mkdocs build") {
+        return Some((CheckKind::Build, "mkdocs".into()));
+    }
+    if lower.starts_with("build")
+        || lower.starts_with("hatch build")
+        || lower.starts_with("maturin build")
+    {
+        // `python -m build` arrives here with the interpreter already stripped.
+        return Some((CheckKind::Build, "python build".into()));
+    }
+    if lower.starts_with("docker build") || lower.starts_with("docker buildx build") {
+        return Some((CheckKind::Build, "docker build".into()));
+    }
+    if lower.starts_with("sphinx-build") {
+        return Some((CheckKind::Build, "sphinx".into()));
+    }
 
     None
 }
@@ -517,8 +533,76 @@ fn parse_outcome(
             }
             (Outcome::Unknown, None, None, None)
         }
+        "npm build" => {
+            // A JS build is a stack of tools, each with its own success line: vite's
+            // `✓ built in 1.04s`, Next's route table, webpack's compile message. Failures
+            // surface as TypeScript diagnostics or an explicit build error.
+            static FAIL: OnceLock<Regex> = OnceLock::new();
+            if re(
+                &FAIL,
+                r"(?i)error TS\d+|error during build|build failed|ERROR in |Failed to compile|✗ build",
+            )
+            .is_match(output)
+            {
+                return (
+                    Outcome::Failed,
+                    None,
+                    None,
+                    line_containing("error").or_else(|| line_containing("fail")),
+                );
+            }
+            static OK: OnceLock<Regex> = OnceLock::new();
+            if re(
+                &OK,
+                r"(?i)✓ built in|built in \d|compiled successfully|Compiled successfully|webpack compiled|✓ \d+ modules transformed|prerendered as static content|Build complete",
+            )
+            .is_match(output)
+            {
+                return (
+                    Outcome::Passed,
+                    None,
+                    Some(0),
+                    line_containing("built in")
+                        .or_else(|| line_containing("compiled"))
+                        .or_else(|| line_containing("static content")),
+                );
+            }
+            generic_outcome(output, kind)
+        }
+        "mkdocs" | "sphinx" => {
+            if output.contains("Aborted") || output.to_lowercase().contains("error") {
+                return (Outcome::Failed, None, None, line_containing("error"));
+            }
+            if output.contains("Documentation built in") || output.contains("build succeeded") {
+                return (Outcome::Passed, None, Some(0), line_containing("built in"));
+            }
+            generic_outcome(output, kind)
+        }
+        "python build" => {
+            if output.contains("Successfully built") {
+                return (
+                    Outcome::Passed,
+                    None,
+                    Some(0),
+                    line_containing("successfully built"),
+                );
+            }
+            generic_outcome(output, kind)
+        }
+        "docker build" => {
+            static OK: OnceLock<Regex> = OnceLock::new();
+            if re(
+                &OK,
+                r"(?i)naming to |writing image sha256|Successfully built|DONE \d",
+            )
+            .is_match(output)
+            {
+                return (Outcome::Passed, None, Some(0), line_containing("naming to"));
+            }
+            generic_outcome(output, kind)
+        }
         "tsc" | "pyright" | "eslint" | "flake8" | "pylint" | "golangci-lint" | "biome"
-        | "format check" | "npm build" | "go build" => generic_outcome(output, kind),
+        | "format check" | "go build" => generic_outcome(output, kind),
         _ => generic_outcome(output, kind),
     }
 }
@@ -546,6 +630,7 @@ fn generic_outcome(
         "0 errors",
         "build succeeded",
         "compiled successfully",
+        "built in ",
     ];
     let evidence = |needle: &str| {
         output
@@ -762,6 +847,30 @@ mod tests {
     fn non_check_commands_are_ignored() {
         assert!(analyse(1, "ls -la", "a\nb", false, false).is_empty());
         assert!(analyse(1, "git status", "clean", false, false).is_empty());
+    }
+
+    #[test]
+    fn reads_javascript_build_output() {
+        // Real output from `npm run build` on a vite project. Reporting this as
+        // "outcome cannot be read" told the user nothing they did not already know.
+        let vite = one(
+            "npm run build 2>&1 | tail -60",
+            "dist/assets/index-CkLkKQeO.js  333.87 kB │ gzip: 108.17 kB\n\n✓ built in 568ms",
+        );
+        assert_eq!(vite.outcome, Outcome::Passed);
+
+        let next = one(
+            "npm run build",
+            "○  (Static)   prerendered as static content\nƒ  (Dynamic)  server-rendered on demand",
+        );
+        assert_eq!(next.outcome, Outcome::Passed);
+
+        // A TypeScript diagnostic means the build did not succeed.
+        let broken = one(
+            "npm run build",
+            "> tsc -b && vite build\n\nsrc/pages/StatusPage.tsx(5,1): error TS6133: 'X' is declared but its value is never read.",
+        );
+        assert_eq!(broken.outcome, Outcome::Failed);
     }
 
     #[test]

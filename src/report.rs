@@ -52,8 +52,21 @@ impl Report {
                 if n == 1 { "" } else { "s" }
             )
         };
+        // Inconclusive is not a problem, but it is not a pass either. Folding it into
+        // "all supported" would overstate what was actually verified.
+        let unverified = self
+            .checked
+            .iter()
+            .filter(|c| c.verdict == Verdict::Inconclusive)
+            .count();
+        let supported = self.checked.len() - unverified;
+
         match (p, w) {
             (0, 0) if self.checked.is_empty() => "no verifiable claims were made".to_string(),
+            (0, 0) if unverified > 0 => format!(
+                "{supported} claim{} supported, {unverified} could not be checked",
+                if supported == 1 { "" } else { "s" }
+            ),
             (0, 0) => format!(
                 "{} claim{} checked, all supported",
                 self.checked.len(),
@@ -347,6 +360,26 @@ mod tests {
         let r = report(vec![checked(ClaimKind::TestsPass, Verdict::Supported)]);
         assert!(!r.has_problems());
         assert!(r.headline().contains("all supported"));
+    }
+
+    #[test]
+    fn inconclusive_is_not_counted_as_supported() {
+        // Regression: a report with three supported claims and one inconclusive one
+        // summarised itself as "4 claims checked, all supported", overstating the check.
+        let r = report(vec![
+            checked(ClaimKind::TestsPass, Verdict::Supported),
+            checked(ClaimKind::LintPasses, Verdict::Supported),
+            checked(ClaimKind::Committed, Verdict::Supported),
+            checked(ClaimKind::BuildPasses, Verdict::Inconclusive),
+        ]);
+        let head = r.headline();
+        assert!(!r.has_problems(), "inconclusive is not a problem");
+        assert!(
+            !head.contains("all supported"),
+            "must not claim everything was verified: {head}"
+        );
+        assert!(head.contains("3 claims supported"), "got: {head}");
+        assert!(head.contains("1 could not be checked"), "got: {head}");
     }
 
     #[test]
