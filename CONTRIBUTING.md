@@ -26,7 +26,7 @@ cargo fmt --check
 ## Reporting a bad verdict
 
 A transcript where `backcheck` got it wrong is the most valuable bug report there is, and also
-the most awkward to send — transcripts contain your code, your paths, and sometimes your
+the most awkward to send. Transcripts contain your code, your paths, and sometimes your
 secrets. **Never attach a raw transcript.**
 
 Send instead the smallest set of lines that reproduces the problem, with paths and content
@@ -45,13 +45,17 @@ a good thing to paste.
 ## Adding a runner
 
 This is the best first contribution: self-contained, obviously useful, and the same three steps
-every time. All of it lives in [`src/runners.rs`](src/runners.rs).
+every time. One small edit per file.
 
-1. **Recognise the command** in `classify()`. Return the `CheckKind` and a short runner name.
-2. **Read its outcome** in `parse_outcome()`. Match on your runner name and pull the verdict out
-   of its summary line. Return `Outcome::Unknown` when the output doesn't say — a wrong
-   "verified" is far more damaging than an honest "could not tell".
-3. **Test both directions.** One passing output, one failing output, copied from a real run:
+1. **Recognise the command** in `classify()`, in
+   [`src/runners/classify.rs`](src/runners/classify.rs). Return the `CheckKind` and a short
+   runner name.
+2. **Read its outcome** in `parse_outcome()`, in
+   [`src/runners/outcome.rs`](src/runners/outcome.rs). Match on your runner name and pull the
+   verdict out of its summary line. Return `Outcome::Unknown` when the output does not say. A
+   wrong "verified" is far more damaging than an honest "could not tell".
+3. **Test both directions**, in [`src/runners/mod.rs`](src/runners/mod.rs). One passing output,
+   one failing output, copied from a real run:
 
 ```rust
 #[test]
@@ -63,8 +67,8 @@ fn my_runner_summary() {
 }
 ```
 
-If the runner has flags that qualify a pass — running a subset, stopping at the first failure —
-add them to `caveats_for()` too.
+If the runner has flags that qualify a pass, such as running a subset or stopping at the first
+failure, add them to `caveats_for()` in the same file too.
 
 ## Design rules
 
@@ -89,7 +93,7 @@ any malformed input, missing file, or internal error.
 
 ## Pull requests
 
-Keep them focused — one runner, one fix, one feature. Include a test that fails without your
+Keep them focused: one runner, one fix, one feature. Include a test that fails without your
 change. If you're planning something larger, open an issue first so we can agree on the shape
 before you write it.
 

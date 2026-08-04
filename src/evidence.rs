@@ -75,6 +75,35 @@ pub fn is_test_path(path: &str) -> bool {
         || p.starts_with("test/")
 }
 
+/// The line where git confirms the operation, rather than whatever printed first.
+///
+/// These commands are usually chained (`git status && git commit …`), so the head of the
+/// output often belongs to something else entirely. Quoting `git status` output, or a package
+/// manager's, as proof that a commit happened is worse than quoting nothing.
+fn git_confirmation(kind: GitOpKind, output: &str) -> Option<String> {
+    // Tried in order, so the strongest confirmation wins. Without an ordering the first
+    // vaguely git-shaped line is taken, which is how a fetch's "-> FETCH_HEAD" and a
+    // "remote: GitHub found 1 vulnerability" notice ended up standing in for a push.
+    let tiers: &[&dyn Fn(&str) -> bool] = match kind {
+        GitOpKind::Commit => &[
+            &|t: &str| t.starts_with('[') && t.contains(']'),
+            &|t: &str| t.contains("file changed") || t.contains("files changed"),
+        ],
+        GitOpKind::Push => &[
+            &|t: &str| t.starts_with("To "),
+            &|t: &str| t.contains("->") && !t.contains("FETCH_HEAD"),
+            &|t: &str| t.contains("Everything up-to-date"),
+        ],
+    };
+
+    for matches in tiers {
+        if let Some(line) = output.lines().map(str::trim).find(|t| matches(t)) {
+            return Some(line.to_string());
+        }
+    }
+    None
+}
+
 /// A git operation the agent performed.
 #[derive(Debug, Clone)]
 pub struct GitOp {
@@ -157,10 +186,7 @@ impl Ledger {
                 kind,
                 command: segment,
                 succeeded,
-                output_line: output
-                    .lines()
-                    .find(|l| !l.trim().is_empty())
-                    .map(|l| l.trim().to_string()),
+                output_line: git_confirmation(kind, &output),
             });
         }
     }
@@ -285,6 +311,34 @@ mod tests {
         let l = ledger_from(&[bash("1", "pytest -q"), result("1", "5 passed")]);
         assert_eq!(l.checks.len(), 1);
         assert!(l.has_clean_pass(CheckKind::Test));
+    }
+
+    #[test]
+    fn git_evidence_quotes_git_not_its_neighbours() {
+        // Regression: chained commands meant a commit was "proved" by `git status` output,
+        // and in one session by a package manager's "Resolved 80 packages in 1ms".
+        let l = ledger_from(&[
+            bash("1", "git status --short && git commit -m 'x'"),
+            result(
+                "1",
+                "M  .github/workflows/code_checks.yml\n[main 31eff88] x\n 1 file changed",
+            ),
+        ]);
+        let op = l.last_git_op(GitOpKind::Commit).unwrap();
+        assert_eq!(op.output_line.as_deref(), Some("[main 31eff88] x"));
+
+        let p = ledger_from(&[
+            bash("2", "uv sync && git push origin main"),
+            result(
+                "2",
+                "Resolved 80 packages in 1ms\nTo github.com:acme/repo.git\n   a1..b2  main -> main",
+            ),
+        ]);
+        let push = p.last_git_op(GitOpKind::Push).unwrap();
+        assert_eq!(
+            push.output_line.as_deref(),
+            Some("To github.com:acme/repo.git")
+        );
     }
 
     #[test]
