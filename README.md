@@ -129,10 +129,58 @@ It separately flags a suite made to pass rather than made to work: skip and igno
 added, assertions weakened (`assertEqual` to `assertTrue`, `toEqual` to `toBeTruthy`),
 assertions or test cases deleted, test files removed with `rm`.
 
-Runners understood: pytest, unittest, tox, nox, cargo test, cargo nextest, go test, jest,
-vitest, mocha, ava, bun test, npm/yarn/pnpm test, rspec, phpunit, dotnet test, maven, gradle,
-ctest, make test, plus mypy, pyright, tsc, ruff, eslint, clippy, flake8, pylint, golangci-lint,
-biome. [Adding one](CONTRIBUTING.md#adding-a-runner) is a small, self-contained change.
+## More of what it catches
+
+**The stale green.** The most common one, and the easiest to miss: the suite really did pass,
+just not on the code you are about to merge.
+
+```console
+  ~ qualified    tests pass
+      “Refactored the eviction path. All 214 tests pass.”
+      `cargo test` passed, but 2 files changed afterwards and were never re-tested
+      (src/cache.rs, src/router.rs)
+      evidence: test result: ok. 214 passed; 0 failed; 0 measured; 0 filtered out
+```
+
+**The narrow run reported as the whole suite.** Two tests out of 1586, described as "both tests
+pass again":
+
+```console
+  ~ qualified    tests pass
+      `cargo test` passed, but only a subset of tests ran (1584 tests filtered out)
+      evidence: test result: ok. 2 passed; 0 failed; 1584 filtered out
+```
+
+**The claim with nothing behind it.** No `git commit` ran anywhere in the session:
+
+```console
+  ✗ unsupported  changes committed
+      “Fixed the proration bug and committed the change.”
+      no `git commit` appears in this session
+```
+
+Equally important is what it stays quiet about. A passing suite followed by a README edit, a
+`pytest -x` run where nothing failed, `ruff --fix` reporting `1 fixed, 0 remaining`, a test
+renamed rather than deleted: all fine, all silent. Each of those was a false alarm once, and
+each is now a regression test.
+
+## Runners it understands
+
+Verification only works for commands `backcheck` can read the result of, so the list matters.
+
+| | |
+|---|---|
+| **Tests** | pytest · unittest · tox · nox · cargo test · cargo nextest · go test · jest · vitest · mocha · ava · bun test · npm / yarn / pnpm test · rspec · phpunit · dotnet test · maven · gradle · ctest · make test |
+| **CI** | `gh pr checks` · `gh run watch` |
+| **Types** | mypy · pyright · tsc · cargo check |
+| **Lint** | ruff · eslint · clippy · flake8 · pylint · golangci-lint · biome · pre-commit · cargo fmt · gofmt |
+| **Build** | cargo build · go build · npm / vite / Next build · `python -m build` · docker build · mkdocs · sphinx |
+
+It sees through the wrappers these arrive in: `uv run`, `poetry run`, `npx`, `pnpm exec`,
+`python -m`, and virtualenv paths like `.venv/bin/python -m pytest`.
+
+Missing yours? [Adding one](CONTRIBUTING.md#adding-a-runner) is three steps in a single file and
+the most useful first contribution to the project ([#3](https://github.com/VectorInstitute/backcheck/issues/3)).
 
 ## How it works
 
@@ -164,18 +212,21 @@ No model is called, so runs are deterministic, free, and offline: 213 MB of real
 
 Those transcripts are also how it was tested, in two ways. Across 80 real Claude Code sessions
 (219 MB) its "was a suite actually run" conclusion was cross-checked against an independent scan
-of the raw JSONL: 36 of 36 in agreement. Separately, six sessions were read line by line and
+of the raw JSONL: 36 of 36 in agreement. Separately, a dozen sessions were read line by line and
 adjudicated by hand first, then compared against what `backcheck` reported. That second pass is
-where the interesting bugs were, and every one is now a regression test:
+where the interesting bugs were, and all of them are now regression tests. A sample:
 
 - a chained `pytest …; echo ---; ruff …` fed both parsers the whole stream, so a linter's "All
   checks passed!" was cited as the evidence that tests passed
 - `cargo test <name>` passing 2 of 1586 tests was reported as a clean pass, not a subset
-- `Found 1 error (1 fixed, 0 remaining)` from `ruff --fix` was read as a failure and
-  contradicted an honest claim
-- editing a README after a green suite marked the tests stale
-- `pytest -x` that passed was flagged for stopping early, though nothing stopped it
-- explaining a bug ("run.sh … pushed to main on every run") was read as a claim to have pushed
+- `Found 1 error (1 fixed, 0 remaining)` from `ruff --fix` was read as a failure
+- a formatter wrapping an assertion across lines looked like the comparison had been removed
+- `pytest tests/test_x.py tests/` runs the whole suite, but the filename made it look narrow
+- a shell error in a later part of a chain marked an already-finished `pytest` as interrupted
+- a CI failure at the start of a session contradicted a claim made thirty steps later, after
+  the problem had been fixed
+- "Test of Time → green gradient banner" was read as a passing suite, and "pushed the last item
+  over" as a `git push`
 
 ## Limitations
 

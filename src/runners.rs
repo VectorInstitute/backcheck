@@ -260,6 +260,11 @@ pub fn classify(segment: &str) -> Option<(CheckKind, String)> {
     if lower.starts_with("make test") || lower.starts_with("make check") {
         return Some((CheckKind::Test, "make test".into()));
     }
+    // Continuous integration is where a lot of verification actually happens. An agent that
+    // waits on `gh pr checks` and reads the result has evidence, even though nothing ran locally.
+    if lower.starts_with("gh pr checks") || lower.starts_with("gh run watch") {
+        return Some((CheckKind::Test, "ci checks".into()));
+    }
 
     // Type checkers.
     for (needle, name) in [("mypy", "mypy"), ("pyright", "pyright"), ("tsc", "tsc")] {
@@ -289,6 +294,10 @@ pub fn classify(segment: &str) -> Option<(CheckKind, String)> {
     }
     if lower.starts_with("cargo fmt") || lower.starts_with("gofmt") {
         return Some((CheckKind::Lint, "format check".into()));
+    }
+    // pre-commit fans out to the project's own linters, so its summary stands in for them.
+    if lower.starts_with("pre-commit run") {
+        return Some((CheckKind::Lint, "pre-commit".into()));
     }
 
     // Builds.
@@ -384,8 +393,26 @@ fn reported_subset(output: &str) -> Option<Caveat> {
     Some(Caveat::SubsetOnly(format!("{n} tests filtered out")))
 }
 
+/// Does the command also hand the runner a whole directory to walk?
+///
+/// `pytest tests/test_orchestrator.py tests/` names one file and then the entire suite, so it
+/// runs everything; treating it as a subset because a filename appears would be wrong.
+fn covers_a_directory(segment: &str) -> bool {
+    segment
+        .split_whitespace()
+        .skip(1)
+        .filter(|t| !t.starts_with('-'))
+        .any(|t| {
+            let t = t.trim_matches(|c| c == '"' || c == '\'');
+            t.ends_with('/') || t == "." || t == "./"
+        })
+}
+
 /// Does the command name specific test files or test ids, rather than a whole suite?
 fn targets_specific_tests(segment: &str) -> Option<Caveat> {
+    if covers_a_directory(segment) {
+        return None;
+    }
     static RE: OnceLock<Regex> = OnceLock::new();
     let r = re(
         &RE,
@@ -617,6 +644,39 @@ fn parse_outcome(
             }
             generic_outcome(output, kind)
         }
+        "ci checks" => {
+            // `gh pr checks` prints one tab-separated row per check: name, state, duration, url.
+            let mut passed = 0u32;
+            let mut failed = 0u32;
+            for line in output.lines() {
+                let state = line.split('\t').nth(1).unwrap_or("").trim().to_lowercase();
+                match state.as_str() {
+                    "pass" | "success" | "skipping" | "skipped" | "neutral" => passed += 1,
+                    "fail" | "failure" | "cancelled" | "timed_out" => failed += 1,
+                    _ => {}
+                }
+            }
+            let ev = output
+                .lines()
+                .rev()
+                .find(|l| l.contains('\t'))
+                .map(|l| l.split('\t').take(2).collect::<Vec<_>>().join(": "));
+            match (passed, failed) {
+                (_, f) if f > 0 => (Outcome::Failed, Some(passed), Some(f), ev),
+                (p, _) if p > 0 => (Outcome::Passed, Some(p), Some(0), ev),
+                _ => (Outcome::Unknown, None, None, None),
+            }
+        }
+        "pre-commit" => {
+            // Each hook reports "name.....Passed" or "Failed"; any failure fails the run.
+            if output.contains("Failed") {
+                return (Outcome::Failed, None, None, line_containing("failed"));
+            }
+            if output.contains("Passed") || output.contains("Skipped") {
+                return (Outcome::Passed, None, Some(0), line_containing("passed"));
+            }
+            generic_outcome(output, kind)
+        }
         "mkdocs" | "sphinx" => {
             if output.contains("Aborted") || output.to_lowercase().contains("error") {
                 return (Outcome::Failed, None, None, line_containing("error"));
@@ -830,11 +890,17 @@ pub fn analyse(
             }
         }
 
-        let (outcome, passed, failed, evidence_line) = if interrupted || is_error {
-            (Outcome::DidNotComplete, None, None, None)
-        } else {
-            parse_outcome(&runner, kind, region)
-        };
+        // Parse first, then decide what an error flag means. A failure in one part of a chain
+        // ("echo ===" tripping the shell) marks the whole call as errored, but a runner that
+        // already printed "1465 passed" plainly finished. Only fall back to "did not complete"
+        // when the output leaves the result genuinely unknown.
+        let parsed = parse_outcome(&runner, kind, region);
+        let (outcome, passed, failed, evidence_line) =
+            if parsed.0 == Outcome::Unknown && (interrupted || is_error) {
+                (Outcome::DidNotComplete, None, None, None)
+            } else {
+                parsed
+            };
         if outcome == Outcome::Failed && failed == Some(0) && passed == Some(0) {
             caveats.push(Caveat::NoTestsRan);
         }
@@ -854,6 +920,26 @@ pub fn analyse(
         // was never truncated by them, so the flag says nothing about coverage.
         if outcome == Outcome::Passed {
             caveats.retain(|c| !matches!(c, Caveat::StopsEarly(_)));
+        }
+
+        // A JS build script usually runs the type checker on the way through, and says so:
+        // "> tsc -b && vite build". A build that got past that line is also evidence the types
+        // are clean, which is what the agent means by "tsc and the build pass".
+        if kind == CheckKind::Build && outcome == Outcome::Passed {
+            static TSC_STEP: OnceLock<Regex> = OnceLock::new();
+            if re(&TSC_STEP, r"(?m)^\s*>\s*[^\n]*\btsc\b").is_match(region) {
+                runs.push(CheckRun {
+                    seq,
+                    kind: CheckKind::TypeCheck,
+                    runner: "tsc".into(),
+                    command: segment.clone(),
+                    outcome: Outcome::Passed,
+                    caveats: caveats.clone(),
+                    passed: None,
+                    failed: Some(0),
+                    evidence_line: Some("the build ran `tsc` and completed".to_string()),
+                });
+            }
         }
 
         runs.push(CheckRun {
@@ -1038,9 +1124,95 @@ mod tests {
     }
 
     #[test]
+    fn a_named_file_beside_a_whole_directory_is_not_a_subset() {
+        // Regression: `pytest tests/test_orchestrator.py tests/` runs the entire suite, but the
+        // filename made it look like only one file had been tested.
+        let r = one(
+            "uv run pytest tests/test_orchestrator.py tests/ -q",
+            "152 passed in 0.87s",
+        );
+        assert!(
+            r.is_clean_pass(),
+            "the directory argument means everything ran: {:?}",
+            r.caveats
+        );
+
+        let dot = one("pytest . -q", "40 passed");
+        assert!(dot.is_clean_pass());
+    }
+
+    #[test]
     fn interrupted_run_did_not_complete() {
         let r = analyse(1, "pytest", "", true, false).remove(0);
         assert_eq!(r.outcome, Outcome::DidNotComplete);
+    }
+
+    #[test]
+    fn a_later_broken_segment_does_not_erase_an_earlier_result() {
+        // Regression: `echo ===` tripped the shell and flagged the whole call as errored, so a
+        // pytest run that had already printed "1465 passed" was reported as never completing.
+        let runs = analyse(
+            1,
+            "uv run pytest -q; echo ===; uv run ruff check .",
+            "1465 passed, 173 warnings in 108.51s\n(eval):1: == not found",
+            false,
+            true,
+        );
+        let t = runs.iter().find(|r| r.kind == CheckKind::Test).unwrap();
+        assert_eq!(t.outcome, Outcome::Passed);
+        assert_eq!(t.passed, Some(1465));
+    }
+
+    #[test]
+    fn a_build_that_ran_tsc_also_evidences_the_type_check() {
+        // `npm run build` prints the script it is running; when that includes tsc, a completed
+        // build is evidence the types are clean too.
+        let runs = analyse(
+            1,
+            "npm run build",
+            "> site@1.0.0 build\n> tsc -b && vite build\n\nvite v6.4.2 building for production...\n✓ built in 1.08s",
+            false,
+            false,
+        );
+        let tsc = runs.iter().find(|r| r.kind == CheckKind::TypeCheck);
+        assert!(tsc.is_some(), "tsc step should be recorded: {runs:?}");
+        assert_eq!(tsc.unwrap().outcome, Outcome::Passed);
+
+        // A build with no type-checking step must not manufacture one.
+        let plain = analyse(1, "npm run build", "✓ built in 1.08s", false, false);
+        assert!(plain.iter().all(|r| r.kind != CheckKind::TypeCheck));
+    }
+
+    #[test]
+    fn reads_ci_check_results() {
+        // `gh pr checks` is how a lot of verification actually gets confirmed.
+        let ok = one(
+            "gh pr checks 261 --watch",
+            "code-checks\tpass\t1m2s\thttps://x\nunit-tests\tpass\t26s\thttps://y",
+        );
+        assert_eq!(ok.outcome, Outcome::Passed);
+        assert_eq!(ok.passed, Some(2));
+
+        let bad = one(
+            "gh pr checks 261",
+            "code-checks\tpass\t1m2s\thttps://x\nunit-tests\tfail\t26s\thttps://y",
+        );
+        assert_eq!(bad.outcome, Outcome::Failed);
+    }
+
+    #[test]
+    fn reads_pre_commit_results() {
+        let ok = one(
+            "uv run pre-commit run --all-files",
+            "ruff.....................................................................Passed\nmypy.....................................................................Passed",
+        );
+        assert_eq!(ok.outcome, Outcome::Passed);
+
+        let bad = one(
+            "pre-commit run --all-files",
+            "ruff.....................................................................Failed",
+        );
+        assert_eq!(bad.outcome, Outcome::Failed);
     }
 
     #[test]

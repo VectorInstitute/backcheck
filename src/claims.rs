@@ -72,6 +72,17 @@ fn describes_something_else(sentence: &str) -> bool {
         r"(?i)\b(on every (?:single )?run|every single run|each run|each time|every time|used to|previously|historically|in the past|before this|which (?:did|does|was|were|had|has)|the (?:culprit|cause|reason|channel) )",
     )
     .is_match(sentence)
+        || pushed_something_other_than_code(sentence)
+}
+
+/// "pushed the last item over" is a figure of speech, not a `git push`.
+fn pushed_something_other_than_code(sentence: &str) -> bool {
+    static METAPHOR: OnceLock<Regex> = OnceLock::new();
+    re(
+        &METAPHOR,
+        r"(?i)\bpush(?:ed|es|ing)?\b[^.]{0,60}\b(over|past|beyond|across|through|into place|off|aside|back|down|up|onto|out of view|below the fold|to the (?:right|left)|out of|further)\b",
+    )
+    .is_match(sentence)
 }
 
 /// Sentences that assert the opposite are not positive claims.
@@ -161,8 +172,10 @@ fn all_patterns() -> Vec<Pattern> {
     vec![
         Pattern {
             kind: ClaimKind::TestsPass,
-            // "all tests pass", "the test suite is green", "tests passing", "42 tests pass"
-            regex: r"(?i)\b(?:all |the |\d+ )*tests?(?: suite)?\b[^.]{0,30}\b(pass(?:es|ed|ing)?|green|succeed(?:s|ed)?)\b|\b(?:test suite|suite)\b[^.]{0,20}\b(?:pass(?:es|ed|ing)?|green)\b",
+            // "all tests pass", "the test suite is green", "tests passing", "42 tests pass".
+            // "green" is only a verdict next to the thing it describes: a paper award called
+            // "Test of Time" rendered with a "green gradient banner" is not a passing suite.
+            regex: r"(?i)\b(?:all |the |\d+ )*tests?(?: suite)?\b[^.]{0,30}\b(pass(?:es|ed|ing)?|succeed(?:s|ed)?)\b|\b(?:tests?|test suite|suite|build|ci)\b\s*(?:is|are|all|now|still|were)?\s*green\b|\ball green\b",
             cell: &TESTS,
         },
         Pattern {
@@ -336,6 +349,24 @@ mod tests {
         assert!(kinds("I'll make sure all tests pass.").is_empty());
         assert!(kinds("Do all tests pass?").is_empty());
         assert!(kinds("Once the tests pass, I will commit.").is_empty());
+    }
+
+    #[test]
+    fn green_needs_to_describe_the_tests() {
+        // Regression: a conference award named "Test of Time" shown with a green banner was
+        // read as a passing suite.
+        assert!(kinds("Test of Time → green gradient banner, laid out as a highlight.").is_empty());
+        assert!(kinds("The tests are green.").contains(&ClaimKind::TestsPass));
+        assert!(kinds("All green.").contains(&ClaimKind::TestsPass));
+    }
+
+    #[test]
+    fn ignores_figurative_pushes() {
+        // Regression: "pushed the last item over" was read as a git push.
+        assert!(
+            kinds("The accuracy edits added a few lines and pushed the last item over.").is_empty()
+        );
+        assert!(kinds("Pushed to origin.").contains(&ClaimKind::Pushed));
     }
 
     #[test]

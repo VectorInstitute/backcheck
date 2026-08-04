@@ -104,14 +104,29 @@ fn weakened_assertions(old: &str, new: &str) -> Option<String> {
         }
     }
     // `assert x == y` collapsing to a bare `assert x` is the same move in plain Python/Rust.
-    static EQ: OnceLock<Regex> = OnceLock::new();
-    let r = re(&EQ, r"assert[!\s(][^\n]*[=!]=");
-    let old_eq = r.find_iter(old).count();
-    let new_eq = r.find_iter(new).count();
+    let old_eq = equality_assertions(old);
+    let new_eq = equality_assertions(new);
     if new_eq < old_eq && assertion_count(new) >= assertion_count(old) {
         return Some("an equality assertion was reduced to a truthiness check".to_string());
     }
     None
+}
+
+/// Count assertions that compare two values.
+///
+/// Whitespace is collapsed first, because a formatter wrapping
+/// `assert any(a == b for x in y)` across several lines must not look like the comparison was
+/// taken out. Reformatting is routine, so treating it as tampering would be a constant false
+/// alarm.
+fn equality_assertions(s: &str) -> usize {
+    let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    flat.match_indices("assert")
+        .filter(|(i, _)| {
+            // Look only as far as a plausible single statement reaches.
+            let tail: String = flat[*i..].chars().take(220).collect();
+            tail.contains("==") || tail.contains("!=")
+        })
+        .count()
 }
 
 /// Test functions defined in a fragment, by name.
@@ -336,6 +351,18 @@ mod tests {
             "def test_add():\n    add(1,2)",
         );
         assert!(f.iter().any(|f| f.kind == "assertions removed"));
+    }
+
+    #[test]
+    fn reformatting_an_assertion_is_not_weakening_it() {
+        // Regression: a formatter wrapping this assertion across lines moved the `==` off the
+        // `assert` line, and the comparison looked like it had been removed.
+        let f = scan_edit(
+            "tests/integration/test_onboarding.py",
+            "        assert any(log.action == \"user.create\" and log.actor_email == EMAIL for log in logs)",
+            "        assert any(\n            log.action == \"user.create\" and log.actor_email == EMAIL\n            for log in logs\n        )",
+        );
+        assert!(f.is_empty(), "reformatting must not be flagged: {f:?}");
     }
 
     #[test]

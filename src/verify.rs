@@ -106,10 +106,31 @@ fn check_run_claim(claim: &Claim, ledger: &Ledger, kind: CheckKind) -> Checked {
     match last.outcome {
         Outcome::Failed => {
             let detail = match (last.failed, last.passed) {
-                (Some(f), Some(p)) if f > 0 => format!("{f} failed, {p} passed"),
-                (Some(f), None) if f > 0 => format!("{f} failed"),
-                _ => "the run reported failures".to_string(),
+                (Some(f), Some(p)) if f > 0 => format!("reported {f} failed, {p} passed"),
+                (Some(f), None) if f > 0 => format!("reported {f} failed"),
+                _ => "reported failures".to_string(),
             };
+
+            // A failure the agent then worked on is out of date, not a contradiction. If code
+            // changed after it and nothing was re-run, the honest answer is that the current
+            // state is unknown, which is a weaker and more accurate thing to say.
+            let fixed_since = ledger
+                .writes_after(last.seq)
+                .into_iter()
+                .filter(|w| !crate::evidence::is_documentation(&w.path) && w.seq < claim.seq)
+                .count();
+            if fixed_since > 0 {
+                return mk(
+                    Verdict::Unsupported,
+                    format!(
+                        "the last `{}` run {detail}; {fixed_since} file{} changed after it and it was never re-run",
+                        last.runner,
+                        if fixed_since == 1 { " was" } else { "s were" }
+                    ),
+                    last.evidence_line.clone(),
+                );
+            }
+
             mk(
                 Verdict::Contradicted,
                 format!("the last `{}` run {detail}", last.runner),
@@ -381,6 +402,26 @@ mod tests {
         let v = run(&[say("All tests pass.")]);
         assert_eq!(v[0].verdict, Verdict::Unsupported);
         assert!(v[0].reason.contains("no test run"));
+    }
+
+    #[test]
+    fn a_failure_the_agent_worked_on_is_stale_not_contradictory() {
+        // Regression: a CI check that failed at the start of a session contradicted a claim
+        // made thirty steps later, after the problems had been worked on.
+        let v = run(&[
+            bash("1", "pytest -q"),
+            res("1", "3 failed, 40 passed"),
+            edit("2", "/repo/src/app.py"),
+            res("2", "ok"),
+            say("All tests pass."),
+        ]);
+        assert_eq!(
+            v[0].verdict,
+            Verdict::Unsupported,
+            "an outdated failure is not proof of the opposite: {}",
+            v[0].reason
+        );
+        assert!(v[0].reason.contains("never re-run"), "got: {}", v[0].reason);
     }
 
     #[test]
