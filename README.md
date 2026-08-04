@@ -191,16 +191,25 @@ Worth knowing before you trust it:
   legitimate move; `backcheck` shows you the edit and you decide.
 - Only Claude Code transcripts are read today. The parser is isolated in
   [`src/transcript.rs`](src/transcript.rs) — other agents are a contained change, and
-  [#4](https://github.com/VectorInstitute/backcheck/issues/4) is open for it.
+  [#5](https://github.com/VectorInstitute/backcheck/issues/5) is open for it.
 
 ## Contributing
 
 Issues labelled [`good first issue`](https://github.com/VectorInstitute/backcheck/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
-are scoped to be a single self-contained change with an obvious test. Adding a test runner is
-the easiest place to start and the most immediately useful.
+are scoped to be a single self-contained change with an obvious test. Good places to start:
+
+- [#3](https://github.com/VectorInstitute/backcheck/issues/3) — **teach it a test runner it doesn't know.**
+  Three steps in one file, and every runner added makes the tool correct for a whole ecosystem.
+- [#9](https://github.com/VectorInstitute/backcheck/issues/9) — **verify a new kind of claim**
+  ("I ran the migration", "I removed the debug logging").
+- [#5](https://github.com/VectorInstitute/backcheck/issues/5) — **support another agent.**
+  Only the transcript parser is Claude-specific; everything downstream is already agnostic.
+- [#10](https://github.com/VectorInstitute/backcheck/issues/10) — **make it installable without
+  a Rust toolchain** (Homebrew, `npx`, `curl | sh`).
 
 Have a transcript where `backcheck` got it wrong? That is the most valuable bug report there is
-— see [CONTRIBUTING.md](CONTRIBUTING.md) for how to send one with the sensitive parts removed.
+— [#6](https://github.com/VectorInstitute/backcheck/issues/6) explains how to send one with the
+sensitive parts removed. Two of the sharpest bugs found so far came in exactly that way.
 
 ## License
 
