@@ -329,8 +329,7 @@ fn dismissed_failures(transcript: &Transcript, ledger: &Ledger) -> Vec<Finding> 
                 "a `{}` run failed and was set aside as pre-existing rather than fixed",
                 failed
                     .iter()
-                    .filter(|c| c.seq < msg.seq)
-                    .next_back()
+                    .rfind(|c| c.seq < msg.seq)
                     .map(|c| c.runner.as_str())
                     .unwrap_or("check")
             ),

@@ -78,12 +78,12 @@ jobs:
       - name: install is idempotent and preserves settings
         run: |
           mkdir -p .claude
-          echo '{"model":"opus"}' > .claude/settings.json
+          echo '{"model":"opus"}' > .claude/settings.local.json
           ./target/release/backcheck install
           ./target/release/backcheck install
           python3 - <<'PY'
           import json
-          s = json.load(open('.claude/settings.json'))
+          s = json.load(open('.claude/settings.local.json'))
           assert s['model'] == 'opus', 'existing settings must survive'
           stop = s['hooks']['Stop']
           assert len(stop) == 1, f'installed twice: {stop}'

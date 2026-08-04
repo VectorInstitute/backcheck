@@ -12,7 +12,9 @@ documentation = "https://github.com/VectorInstitute/backcheck#readme"
 readme = "README.md"
 keywords = ["claude-code", "agent", "verification", "testing", "cli"]
 categories = ["command-line-utilities", "development-tools::testing"]
-exclude = ["tests/fixtures/*", ".github/*"]
+# tests/fixtures/demo.jsonl is compiled into the binary by `backcheck demo`,
+# so it must ship in the package.
+exclude = [".github/*"]
 
 [dependencies]
 anyhow = "1.0"
