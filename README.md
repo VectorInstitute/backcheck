@@ -102,10 +102,26 @@ reasons, so the agent has to run what it said it ran or correct its summary befo
 ends. Use `--no-block` to report without blocking, and `backcheck uninstall` to remove it.
 
 ```bash
+backcheck --explain  # show what it recognised, and what ran that it did not
 backcheck --json     # machine-readable
 backcheck --verbose  # show supported claims too
 backcheck --live     # also consult the working tree and git
 backcheck --help
+```
+
+`--explain` is the one to reach for when a verdict surprises you. The usual reason a claim reads
+as unsupported is not that nothing ran, but that the tool which ran is one `backcheck` does not
+know yet, and it will say so:
+
+```console
+  What backcheck saw
+    passed            pytest (test)
+        40 passed in 1.30s
+    unreadable        eslint (lint)
+
+  Ran, but not recognised as a check
+    If one of these is a real check, backcheck is missing a runner for it.
+    npm run lint:styles
 ```
 
 ## What it checks
@@ -171,13 +187,13 @@ Verification only works for commands `backcheck` can read the result of, so the 
 | | |
 |---|---|
 | **Tests** | pytest · unittest · tox · nox · cargo test · cargo nextest · go test · jest · vitest · mocha · ava · bun test · npm / yarn / pnpm test · rspec · phpunit · dotnet test · maven · gradle · ctest · make test |
-| **CI** | `gh pr checks` · `gh run watch` |
+| **CI** | `gh pr checks` · `gh run list` · `gh run view` · `gh run watch` |
 | **Types** | mypy · pyright · tsc · cargo check |
-| **Lint** | ruff · eslint · clippy · flake8 · pylint · golangci-lint · biome · pre-commit · cargo fmt · gofmt |
+| **Lint** | ruff · eslint · clippy · flake8 · pylint · golangci-lint · biome · pre-commit · import-linter · npm lint · cargo fmt · gofmt |
 | **Build** | cargo build · go build · npm / vite / Next build · `python -m build` · docker build · mkdocs · sphinx |
 
 It sees through the wrappers these arrive in: `uv run`, `poetry run`, `npx`, `pnpm exec`,
-`python -m`, and virtualenv paths like `.venv/bin/python -m pytest`.
+`python -m`, `timeout 240 …`, shell loops, and virtualenv paths like `.venv/bin/python -m pytest`.
 
 Missing yours? [Adding one](CONTRIBUTING.md#adding-a-runner) is three steps in a single file and
 the most useful first contribution to the project ([#3](https://github.com/VectorInstitute/backcheck/issues/3)).

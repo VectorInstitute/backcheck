@@ -8,11 +8,25 @@ use std::sync::OnceLock;
 
 use super::re;
 
-/// Split a shell line into segments that each start a fresh command.
+/// How one command in a chain is joined to the next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Join {
+    /// `&&`: the next command runs only if this one exited zero.
+    AndThen,
+    /// `||`: the next command runs only if this one failed.
+    OrElse,
+    /// `;` or a newline: the next command runs regardless.
+    Then,
+}
+
+/// Split a shell line into segments, keeping the operator that follows each one.
+///
+/// The operator is worth preserving because `&&` carries a proof: if the command after it
+/// produced output, the one before it must have exited zero.
 ///
 /// Pipelines are kept intact: `pytest | tail` is one command whose output happens to be filtered.
-pub fn split_segments(command: &str) -> Vec<String> {
-    let mut out = Vec::new();
+pub(crate) fn split_with_joins(command: &str) -> Vec<(String, Join)> {
+    let mut out: Vec<(String, Join)> = Vec::new();
     let mut cur = String::new();
     let (mut in_single, mut in_double) = (false, false);
     // Iterate by character: commands routinely contain multi-byte text (paths, heredoc prose),
@@ -30,21 +44,34 @@ pub fn split_segments(command: &str) -> Vec<String> {
             // `&&` and `||` start a new command; a lone `|` is a pipe and keeps the segment.
             if (c == '&' || c == '|') && chars.peek() == Some(&c) {
                 chars.next();
-                out.push(std::mem::take(&mut cur));
+                let join = if c == '&' {
+                    Join::AndThen
+                } else {
+                    Join::OrElse
+                };
+                out.push((std::mem::take(&mut cur), join));
                 continue;
             }
             if c == ';' || c == '\n' {
-                out.push(std::mem::take(&mut cur));
+                out.push((std::mem::take(&mut cur), Join::Then));
                 continue;
             }
         }
         cur.push(c);
     }
 
-    out.push(cur);
+    out.push((cur, Join::Then));
     out.into_iter()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+        .map(|(s, j)| (s.trim().to_string(), j))
+        .filter(|(s, _)| !s.is_empty())
+        .collect()
+}
+
+/// Split a shell line into segments that each start a fresh command.
+pub fn split_segments(command: &str) -> Vec<String> {
+    split_with_joins(command)
+        .into_iter()
+        .map(|(s, _)| s)
         .collect()
 }
 
@@ -96,6 +123,7 @@ pub(crate) fn strip_invocation(segment: &str) -> String {
             "sudo ",
             "env ",
             "nice ",
+            "do ",
         ] {
             if let Some(rest) = s.strip_prefix(prefix) {
                 s = rest.trim_start().to_string();
@@ -139,13 +167,6 @@ fn echo_literal(segment: &str) -> Option<String> {
     Some(lit.to_string())
 }
 
-/// Split a chained command's output into the region produced by each segment.
-///
-/// Agents habitually separate the parts of a chained command with `echo "=== lint ==="`,
-/// which leaves a findable landmark in the combined output. Where those landmarks can be
-/// located, each check is parsed against only the text it actually produced. Without this
-/// every parser sees the whole stream, so a linter's "All checks passed!" can be reported as
-/// the evidence for a claim about tests.
 /// A slice of a command's output, and whether it is known to belong to that command alone.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Region<'a> {
@@ -154,6 +175,13 @@ pub(crate) struct Region<'a> {
     pub(crate) exclusive: bool,
 }
 
+/// Split a chained command's output into the region produced by each segment.
+///
+/// Agents habitually separate the parts of a chained command with `echo "=== lint ==="`, which
+/// leaves a findable landmark in the combined output. Where those landmarks can be located,
+/// each check is parsed against only the text it actually produced. Without them every parser
+/// sees the whole stream, and a linter's "All checks passed!" can end up cited as the evidence
+/// for a claim about tests.
 pub(crate) fn attribute_output<'a>(segments: &[String], output: &'a str) -> Vec<Region<'a>> {
     // Locate each echo landmark, scanning forward so repeated markers stay in order.
     let mut marks: Vec<Option<(usize, usize)>> = vec![None; segments.len()];

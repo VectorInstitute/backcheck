@@ -336,6 +336,36 @@ pub(crate) fn parse_outcome(
             }
             generic_outcome(output, kind, exclusive)
         }
+        "npm lint" | "npm format" | "npm typecheck" | "npm type-check" => {
+            // These scripts delegate to eslint, prettier, tsc and friends, so the underlying
+            // tool's own wording is what shows up.
+            static TS: OnceLock<Regex> = OnceLock::new();
+            if re(&TS, r"error TS\d+").is_match(output) {
+                return (Outcome::Failed, None, None, line_containing("error ts"));
+            }
+            // npm echoes the script it is about to run on lines beginning with ">". If that
+            // banner is all there is, the underlying linter reported nothing, which is a pass.
+            let substantive: Vec<&str> = output
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('>'))
+                .collect();
+            if substantive.is_empty() && exclusive {
+                return (Outcome::Passed, None, Some(0), None);
+            }
+
+            static PROBLEMS: OnceLock<Regex> = OnceLock::new();
+            if let Some(c) = find(r"(\d+) problems?", &PROBLEMS) {
+                let n: u32 = c[1].parse().unwrap_or(0);
+                let ev = line_containing("problem");
+                return if n == 0 {
+                    (Outcome::Passed, None, Some(0), ev)
+                } else {
+                    (Outcome::Failed, None, Some(n), ev)
+                };
+            }
+            generic_outcome(output, kind, exclusive)
+        }
         "tsc" => {
             // TypeScript prints nothing when it is happy, and every diagnostic it does emit
             // carries a TS error code. That makes the absence of a code a reliable pass even
@@ -364,12 +394,19 @@ fn generic_outcome(
     kind: CheckKind,
     exclusive: bool,
 ) -> (Outcome, Option<u32>, Option<u32>, Option<String>) {
+    // Generic phrasings are precisely the ones that belong to whichever tool happened to print
+    // them. Without knowing this text came from this command, "Success: no issues found" may be
+    // mypy answering on ruff's behalf. Stay quiet, and let the `&&` inference in
+    // [`super::analyse`] settle it from shell semantics instead.
+    if !exclusive {
+        return (Outcome::Unknown, None, None, None);
+    }
+
     let lower = output.to_lowercase();
 
     // A hand-written success marker (`&& echo "RUFF CLEAN"`) is only trustworthy for a
-    // non-test check, where the tool itself is silent on success, and only when the text is
-    // known to be this command's own.
-    if kind != CheckKind::Test && exclusive {
+    // non-test check, where the tool itself is silent on success.
+    if kind != CheckKind::Test {
         static CLEAN: OnceLock<Regex> = OnceLock::new();
         if re(&CLEAN, r"(?i)\b(clean|no problems|no issues|all good)\b").is_match(&lower)
             && !re(&CLEAN_FAIL, r"(?i)\b(error|failed|failure|traceback)\b").is_match(&lower)

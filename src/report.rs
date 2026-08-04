@@ -5,6 +5,14 @@ use serde::Serialize;
 use crate::tamper::{Finding, Severity};
 use crate::verify::{Checked, Verdict};
 
+/// One check backcheck recognised while reading the session, for `--explain`.
+pub struct SeenRun {
+    pub kind: &'static str,
+    pub runner: String,
+    pub outcome: &'static str,
+    pub detail: Option<String>,
+}
+
 /// Everything one run of backcheck concluded.
 pub struct Report {
     pub session_id: Option<String>,
@@ -13,6 +21,9 @@ pub struct Report {
     pub findings: Vec<Finding>,
     /// Number of check runs seen, for the "nothing was ever run" case.
     pub runs_seen: usize,
+    /// What was recognised, and what looked like a check but was not.
+    pub seen: Vec<SeenRun>,
+    pub unrecognised: Vec<String>,
 }
 
 impl Report {
@@ -88,6 +99,16 @@ struct JsonReport<'a> {
     summary: JsonSummary,
     claims: Vec<JsonClaim<'a>>,
     test_integrity: Vec<JsonFinding<'a>>,
+    checks_seen: Vec<JsonSeen<'a>>,
+    unrecognised_commands: &'a [String],
+}
+
+#[derive(Serialize)]
+struct JsonSeen<'a> {
+    kind: &'a str,
+    runner: &'a str,
+    outcome: &'a str,
+    evidence: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -155,6 +176,17 @@ pub fn to_json(r: &Report) -> String {
                 snippet: f.snippet.as_deref(),
             })
             .collect(),
+        checks_seen: r
+            .seen
+            .iter()
+            .map(|s| JsonSeen {
+                kind: s.kind,
+                runner: &s.runner,
+                outcome: s.outcome,
+                evidence: s.detail.as_deref(),
+            })
+            .collect(),
+        unrecognised_commands: &r.unrecognised,
     };
     serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into())
 }
@@ -201,6 +233,52 @@ fn verdict_marker(v: Verdict, st: &Style) -> String {
         Verdict::Contradicted => st.red("✗ contradicted"),
         Verdict::Inconclusive => st.dim("? inconclusive"),
     }
+}
+
+/// What backcheck saw, for when a verdict is surprising.
+///
+/// The usual reason a claim reads as unsupported is not that nothing ran, but that the tool
+/// that ran is one backcheck does not know. Showing both lists makes that immediate.
+pub fn to_explanation(r: &Report, color: bool) -> String {
+    let st = Style { on: color };
+    let mut out = String::new();
+
+    out.push_str(&st.bold("  What backcheck saw\n"));
+    if r.seen.is_empty() {
+        out.push_str(&st.dim("    no checks recognised in this session\n"));
+    }
+    for s in &r.seen {
+        let mark = match s.outcome {
+            "passed" => st.green("passed          "),
+            "failed" => st.red("failed          "),
+            "did not complete" => st.yellow("did not complete"),
+            _ => st.dim("unreadable      "),
+        };
+        out.push_str(&format!(
+            "    {mark}  {} ({})\n",
+            st.bold(&s.runner),
+            s.kind
+        ));
+        if let Some(d) = &s.detail {
+            out.push_str(&format!("        {}\n", st.dim(d)));
+        }
+    }
+
+    if !r.unrecognised.is_empty() {
+        out.push('\n');
+        out.push_str(&st.bold("  Ran, but not recognised as a check\n"));
+        out.push_str(
+            &st.dim("    If one of these is a real check, backcheck is missing a runner for it.\n"),
+        );
+        for c in r.unrecognised.iter().take(15) {
+            out.push_str(&format!("    {}\n", st.cyan(c)));
+        }
+        if r.unrecognised.len() > 15 {
+            out.push_str(&st.dim(&format!("    (+{} more)\n", r.unrecognised.len() - 15)));
+        }
+    }
+    out.push('\n');
+    out
 }
 
 pub fn to_terminal(r: &Report, color: bool, verbose: bool) -> String {
@@ -345,6 +423,8 @@ mod tests {
             checked,
             findings: vec![],
             runs_seen: 0,
+            seen: vec![],
+            unrecognised: vec![],
         }
     }
 

@@ -19,7 +19,7 @@ pub use classify::classify;
 pub use command::split_segments;
 
 use classify::{caveats_for, reported_subset, suppression_caveats, targets_specific_tests};
-use command::{attribute_output, Region};
+use command::{attribute_output, split_with_joins, Join, Region};
 use outcome::parse_outcome;
 
 /// What kind of check a command performs.
@@ -117,8 +117,11 @@ pub fn analyse(
     is_error: bool,
 ) -> Vec<CheckRun> {
     let mut runs = Vec::new();
-    let segments = split_segments(command);
+    let joined = split_with_joins(command);
+    let segments: Vec<String> = joined.iter().map(|(s, _)| s.clone()).collect();
     let regions = attribute_output(&segments, output);
+    // Which segment each run came from, so the `&&` inference below can find its neighbours.
+    let mut origin: Vec<usize> = Vec::new();
 
     for (idx, segment) in segments.iter().enumerate() {
         let segment = segment.clone();
@@ -184,6 +187,7 @@ pub fn analyse(
         if kind == CheckKind::Build && outcome == Outcome::Passed {
             static TSC_STEP: OnceLock<Regex> = OnceLock::new();
             if re(&TSC_STEP, r"(?m)^\s*>\s*[^\n]*\btsc\b").is_match(region.text) {
+                origin.push(idx);
                 runs.push(CheckRun {
                     seq,
                     kind: CheckKind::TypeCheck,
@@ -198,6 +202,7 @@ pub fn analyse(
             }
         }
 
+        origin.push(idx);
         runs.push(CheckRun {
             seq,
             kind,
@@ -210,7 +215,53 @@ pub fn analyse(
             evidence_line,
         });
     }
+
+    infer_from_short_circuit(&mut runs, &origin, &joined, output);
     runs
+}
+
+/// Resolve unreadable results using what `&&` guarantees.
+///
+/// `ruff check . && mypy src` only reaches mypy if ruff exited zero. So when a later command in
+/// an `&&` chain demonstrably ran, every command before it in that chain succeeded, whatever
+/// its own output did or did not say. This is the one place backcheck can be certain about a
+/// tool that printed nothing at all.
+fn infer_from_short_circuit(
+    runs: &mut [CheckRun],
+    origin: &[usize],
+    joined: &[(String, Join)],
+    output: &str,
+) {
+    if output.trim().is_empty() {
+        return;
+    }
+    // The furthest segment known to have produced something.
+    let reached = runs
+        .iter()
+        .enumerate()
+        .filter(|(i, r)| {
+            matches!(r.outcome, Outcome::Passed | Outcome::Failed) && origin.get(*i).is_some()
+        })
+        .filter_map(|(i, _)| origin.get(i).copied())
+        .max();
+    let Some(reached) = reached else { return };
+
+    for (i, run) in runs.iter_mut().enumerate() {
+        let Some(&at) = origin.get(i) else { continue };
+        if run.outcome != Outcome::Unknown || at >= reached {
+            continue;
+        }
+        // Every join between this segment and the one that ran must be `&&` for the
+        // guarantee to hold; a `;` or `||` in between breaks the chain of implication.
+        if joined[at..reached].iter().all(|(_, j)| *j == Join::AndThen) {
+            run.outcome = Outcome::Passed;
+            run.failed = Some(0);
+            run.evidence_line = Some(format!(
+                "a later step in the same `&&` chain ran, so `{}` exited cleanly",
+                run.runner
+            ));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -611,6 +662,51 @@ mod tests {
     }
 
     #[test]
+    fn and_then_proves_the_earlier_command_succeeded() {
+        // `ruff && mypy` only reaches mypy if ruff exited zero, so mypy's summary settles
+        // ruff's silence. This is the one inference available for a tool that prints nothing.
+        let runs = analyse(
+            1,
+            "uv run ruff check . && uv run mypy src",
+            "Success: no issues found in 92 source files",
+            false,
+            false,
+        );
+        let lint = runs.iter().find(|r| r.runner == "ruff").unwrap();
+        assert_eq!(lint.outcome, Outcome::Passed);
+        assert!(lint
+            .evidence_line
+            .as_deref()
+            .unwrap_or_default()
+            .contains("&&"));
+    }
+
+    #[test]
+    fn a_broken_chain_proves_nothing() {
+        // With `;` the second command runs whatever the first did, so silence stays unread.
+        let runs = analyse(
+            1,
+            "uv run ruff check . ; uv run mypy src",
+            "Success: no issues found in 92 source files",
+            false,
+            false,
+        );
+        let lint = runs.iter().find(|r| r.runner == "ruff").unwrap();
+        assert_eq!(lint.outcome, Outcome::Unknown);
+
+        // `||` means the opposite: mypy running would imply ruff had failed.
+        let alt = analyse(
+            1,
+            "uv run ruff check . || uv run mypy src",
+            "Success: no issues found in 92 source files",
+            false,
+            false,
+        );
+        let l2 = alt.iter().find(|r| r.runner == "ruff").unwrap();
+        assert_eq!(l2.outcome, Outcome::Unknown);
+    }
+
+    #[test]
     fn one_tool_never_vouches_for_another() {
         // Regression, and the worst kind: ruff printed nothing, pytest printed "1172 passed",
         // and the shared stream made backcheck report "lint passes: supported".
@@ -731,6 +827,36 @@ mod tests {
         assert!(analyse(1, "test -f /etc/hosts && echo yes", "yes", false, false).is_empty());
         assert!(analyse(1, "test -d build || mkdir build", "", false, false).is_empty());
         assert!(analyse(1, "[ -f x ] && test -x y", "", false, false).is_empty());
+    }
+
+    #[test]
+    fn js_lint_and_typecheck_scripts_are_recognised() {
+        // `npm run lint` is about as common as `npm run build`; missing it left honest claims
+        // about a clean linter reported as unsupported.
+        let lint = one("npm run lint", "\n> eslint .\n");
+        assert_eq!(lint.kind, CheckKind::Lint);
+
+        let failing = one("npm run lint", "✖ 3 problems (3 errors, 0 warnings)");
+        assert_eq!(failing.outcome, Outcome::Failed);
+        assert_eq!(failing.failed, Some(3));
+
+        assert_eq!(one("npm run typecheck", "").kind, CheckKind::TypeCheck);
+    }
+
+    #[test]
+    fn a_runner_inside_a_shell_loop_is_still_a_runner() {
+        // `for i in 1 2 3; do cargo test; done` splits to a segment beginning "do ".
+        let runs = analyse(
+            1,
+            "for i in 1 2 3; do cargo test --lib; done",
+            "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out",
+            false,
+            false,
+        );
+        assert!(
+            runs.iter().any(|r| r.kind == CheckKind::Test),
+            "the loop body should still count: {runs:?}"
+        );
     }
 
     #[test]

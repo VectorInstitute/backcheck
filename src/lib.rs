@@ -42,12 +42,30 @@ pub fn analyse(
         opts.cwd = transcript.cwd.clone();
     }
 
+    let seen = ledger
+        .checks
+        .iter()
+        .map(|c| report::SeenRun {
+            kind: c.kind.label(),
+            runner: c.runner.clone(),
+            outcome: match c.outcome {
+                runners::Outcome::Passed => "passed",
+                runners::Outcome::Failed => "failed",
+                runners::Outcome::Unknown => "unreadable",
+                runners::Outcome::DidNotComplete => "did not complete",
+            },
+            detail: c.evidence_line.clone(),
+        })
+        .collect();
+
     report::Report {
         session_id: transcript.session_id.clone(),
         transcript: source,
         checked: verify::verify(&claims, &ledger, &opts),
         findings: tamper::scan(transcript, &ledger),
         runs_seen: ledger.checks.len(),
+        seen,
+        unrecognised: ledger.unrecognised.clone(),
     }
 }
 

@@ -126,6 +126,22 @@ pub fn classify(segment: &str) -> Option<(CheckKind, String)> {
     if lower.starts_with("npm run build") || lower.starts_with("run build") {
         return Some((CheckKind::Build, "npm build".into()));
     }
+    // The other scripts a JS project conventionally defines. `npm run lint` is about as common
+    // as `npm run build`, and missing it left honest "lint is clean" claims unsupported.
+    static JS_SCRIPT: OnceLock<Regex> = OnceLock::new();
+    if let Some(c) = re(
+        &JS_SCRIPT,
+        r"(?i)\b(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?(lint|format|typecheck|type-check)\b",
+    )
+    .captures(segment)
+    {
+        let script = c[1].to_lowercase();
+        let kind = match script.as_str() {
+            "typecheck" | "type-check" => CheckKind::TypeCheck,
+            _ => CheckKind::Lint,
+        };
+        return Some((kind, format!("npm {script}")));
+    }
     if lower.starts_with("mkdocs build") {
         return Some((CheckKind::Build, "mkdocs".into()));
     }

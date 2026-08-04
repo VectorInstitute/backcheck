@@ -125,6 +125,11 @@ pub struct Ledger {
     pub checks: Vec<CheckRun>,
     pub writes: Vec<FileWrite>,
     pub git_ops: Vec<GitOp>,
+    /// Commands that look like a check but that no runner recognised.
+    ///
+    /// Kept so `--explain` can answer the question a bare "no test run appears" provokes:
+    /// did nothing run, or does backcheck simply not know the tool?
+    pub unrecognised: Vec<String>,
 }
 
 impl Ledger {
@@ -161,6 +166,8 @@ impl Ledger {
         ));
 
         for segment in runners::split_segments(command) {
+            self.note_if_unrecognised(&segment);
+
             let lower = segment.to_lowercase();
             let kind = if lower.starts_with("git commit") || lower.contains(" git commit") {
                 GitOpKind::Commit
@@ -188,6 +195,63 @@ impl Ledger {
                 succeeded,
                 output_line: git_confirmation(kind, &output),
             });
+        }
+    }
+
+    /// Record a command that reads like a check but that no runner claimed.
+    ///
+    /// Deliberately narrow: the point is to surface a missing runner, not to list every shell
+    /// command in the session.
+    fn note_if_unrecognised(&mut self, segment: &str) {
+        use std::sync::OnceLock;
+        static CHECKY: OnceLock<regex::Regex> = OnceLock::new();
+        let checky = CHECKY.get_or_init(|| {
+            regex::Regex::new(
+                r"(?i)\b(test|tests|spec|lint|typecheck|type-check|check|build|compile|coverage|audit|verify|validate)\b",
+            )
+            .expect("static regex")
+        });
+
+        let head: String = segment
+            .split_whitespace()
+            .take(6)
+            .collect::<Vec<_>>()
+            .join(" ");
+        if head.is_empty() || !checky.is_match(&head) {
+            return;
+        }
+        if runners::classify(segment).is_some() {
+            return;
+        }
+        // Reading and searching for tests is not running them.
+        let first = segment.split_whitespace().next().unwrap_or("");
+        if matches!(
+            first,
+            "cat"
+                | "ls"
+                | "grep"
+                | "rg"
+                | "find"
+                | "head"
+                | "tail"
+                | "sed"
+                | "awk"
+                | "echo"
+                | "wc"
+                | "mkdir"
+                | "rm"
+                | "cp"
+                | "mv"
+                | "cd"
+                | "git"
+                | "which"
+                | "touch"
+        ) {
+            return;
+        }
+        let head = head.chars().take(90).collect::<String>();
+        if !self.unrecognised.contains(&head) {
+            self.unrecognised.push(head);
         }
     }
 

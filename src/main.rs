@@ -33,6 +33,10 @@ struct Cli {
     #[arg(long, short, global = true)]
     verbose: bool,
 
+    /// Also show what backcheck recognised, and what ran that it did not.
+    #[arg(long, global = true)]
+    explain: bool,
+
     /// Also consult the working tree and git repository, not just the transcript.
     #[arg(long, global = true)]
     live: bool,
@@ -149,6 +153,9 @@ fn run_check(cli: &Cli, any_project: bool) -> Result<ExitCode> {
             "{}",
             report::to_terminal(&report, use_color(cli), cli.verbose)
         );
+        if cli.explain {
+            print!("{}", report::to_explanation(&report, use_color(cli)));
+        }
     }
 
     Ok(if report.has_problems() {
