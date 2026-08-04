@@ -69,6 +69,12 @@ enum Command {
         #[arg(long)]
         no_block: bool,
     },
+    /// Check this project's recent sessions, not just the last one.
+    History {
+        /// How many of the most recent sessions to read.
+        #[arg(long, default_value = "20")]
+        limit: usize,
+    },
     /// Remove backcheck from Claude Code's Stop hooks.
     Uninstall {
         /// Remove the global installation.
@@ -115,6 +121,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
             }
             Ok(ExitCode::SUCCESS)
         }
+        Some(Command::History { limit }) => run_history(cli, *limit),
         Some(Command::Check { any_project }) => run_check(cli, *any_project),
         None => run_check(cli, false),
     }
@@ -162,6 +169,65 @@ fn run_check(cli: &Cli, any_project: bool) -> Result<ExitCode> {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
+    })
+}
+
+/// Read the project's recent sessions and report only the ones with something to show.
+///
+/// A single session is a thin first impression: most sessions are honest, so the newest one
+/// often has nothing to say. Looking back over a project's history is what makes the tool's
+/// value visible immediately, and it costs milliseconds per session.
+fn run_history(cli: &Cli, limit: usize) -> Result<ExitCode> {
+    let cwd = std::env::current_dir().context("reading the current directory")?;
+    let paths = session::transcripts_for(&cwd)?;
+    if paths.is_empty() {
+        println!(
+            "No Claude Code sessions recorded for {}.\n\nRun backcheck from a directory where you have used Claude Code, \nor point it at a transcript with --transcript <file>.",
+            cwd.display()
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let opts = verify::Options {
+        live: cli.live,
+        cwd: Some(cwd.display().to_string()),
+    };
+
+    let mut examined = 0usize;
+    let mut flagged = Vec::new();
+    for path in paths.iter().take(limit) {
+        let Ok(report) = analyse_transcript(path, &opts) else {
+            continue;
+        };
+        examined += 1;
+        if report.has_problems() {
+            flagged.push(report);
+        }
+    }
+
+    let color = use_color(cli);
+    for report in &flagged {
+        print!("{}", report::to_terminal(report, color, cli.verbose));
+    }
+
+    let sessions = |n: usize| format!("{n} session{}", if n == 1 { "" } else { "s" });
+    if flagged.is_empty() {
+        println!(
+            "\nRead {}. Nothing in them went unsupported.\n",
+            sessions(examined)
+        );
+    } else {
+        println!(
+            "{} of {} had something worth a look.\n",
+            sessions(flagged.len()),
+            examined
+        );
+    }
+
+    Ok(if flagged.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
     })
 }
 

@@ -89,6 +89,16 @@ backcheck
 It reads your most recent session and reports what it could and could not verify. Exit code is
 `1` when something does not hold up, so it drops into a pipeline unchanged.
 
+Most sessions are honest, so the newest one often has nothing to say. To see the tool earn its
+keep, read back over the project instead:
+
+```bash
+backcheck history            # this project's last 20 sessions
+backcheck history --limit 50
+```
+
+It prints only the sessions with something worth a look, at roughly 30 ms each.
+
 Then wire it into Claude Code so it runs on every session:
 
 ```bash

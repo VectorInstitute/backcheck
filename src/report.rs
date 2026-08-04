@@ -294,7 +294,14 @@ pub fn to_terminal(r: &Report, color: bool, verbose: bool) -> String {
     out.push_str(&st.dim(&format!("  {}\n\n", r.transcript)));
 
     if r.checked.is_empty() && r.findings.is_empty() {
-        out.push_str(&st.dim("  No verifiable claims were made in this session.\n\n"));
+        // A dead end is a poor first impression, and it is usually not the whole story: the
+        // newest session is often an honest one while something earlier is worth seeing.
+        out.push_str(&st.dim("  This session made no claim backcheck can check.\n"));
+        out.push_str(
+            &st.dim(
+                "  Try `backcheck history` to read this project's recent sessions instead.\n\n",
+            ),
+        );
         return out;
     }
 
