@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# Never commit real session transcripts: they contain source code, paths, and secrets.
+# Fixtures under tests/fixtures/ are hand-written and safe.
+*.jsonl
+!tests/fixtures/*.jsonl
+
+.DS_Store
+.idea/
+.vscode/

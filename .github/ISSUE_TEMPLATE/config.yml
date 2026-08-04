@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 Discussions
+    url: https://github.com/VectorInstitute/backcheck/discussions
+    about: Questions, ideas, and transcripts where backcheck surprised you
+  - name: 📖 Contributing guide
+    url: https://github.com/VectorInstitute/backcheck/blob/main/CONTRIBUTING.md
+    about: How to add a runner, send a minimal fixture, and the design rules

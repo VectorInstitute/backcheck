@@ -1,0 +1,132 @@
+<svg width="800" height="180" viewBox="0 0 800 180" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!--
+      Vector brand palette:
+        magenta   #EB088A   (primary — the unsupported claim)
+        cobalt    #313CFF
+        violet    #8A25C9
+        turquoise #48C0D9   (verified evidence)
+
+      Concept: the check mark is what the agent *claimed*. Below it runs the session
+      transcript, and the tracer sweeps it right-to-left — backwards — because the claim
+      is made at the end and the proof has to be found behind it. One node is magenta:
+      the step the claim rests on that nothing actually supports.
+    -->
+
+    <!-- The claim: a check mark -->
+    <path id="check" d="M72,86 L104,122 L188,36"/>
+
+    <!-- The transcript: a timeline scanned in reverse -->
+    <path id="timeline" d="M268,150 L56,150"/>
+
+    <radialGradient id="glowbg" cx="150" cy="90" r="165" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#EB088A" stop-opacity="0.09"/>
+      <stop offset="100%" stop-color="#EB088A" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Check gradient: resolves magenta → violet → cobalt as it rises -->
+    <linearGradient id="checkg" x1="72" y1="122" x2="188" y2="36" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#EB088A"/>
+      <stop offset="52%"  stop-color="#8A25C9"/>
+      <stop offset="100%" stop-color="#313CFF"/>
+    </linearGradient>
+
+    <linearGradient id="tg" x1="345" y1="0" x2="710" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#EB088A"/>
+      <stop offset="100%" stop-color="#313CFF"/>
+    </linearGradient>
+
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <filter id="softglow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="1.8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <filter id="tracerglow" x="-200%" y="-200%" width="500%" height="500%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@500;800&amp;display=swap');
+    </style>
+  </defs>
+
+  <rect width="800" height="180" rx="16" fill="url(#glowbg)"/>
+
+  <!-- ── The claim ──────────────────────────────────────────────────── -->
+
+  <!-- Ghost echo: the claim before it has been checked -->
+  <use href="#check" stroke="url(#checkg)" stroke-width="14" fill="none"
+       stroke-linecap="round" stroke-linejoin="round" opacity="0.13"/>
+
+  <!-- The check itself -->
+  <use href="#check" stroke="url(#checkg)" stroke-width="13" fill="none"
+       stroke-linecap="round" stroke-linejoin="round"
+       filter="url(#glow)" opacity="0.95"/>
+
+  <!--
+    The tip is drawn again in magenta and pulses: the part of the claim that
+    outruns its evidence.
+  -->
+  <path d="M170,53 L188,36" stroke="#EB088A" stroke-width="13" fill="none"
+        stroke-linecap="round" filter="url(#glow)">
+    <animate attributeName="opacity" values="0;0.95;0" dur="3.2s" repeatCount="indefinite"/>
+  </path>
+
+  <!-- Link from the flagged step up to the claim it was supposed to support -->
+  <path d="M152,142 L180,52" stroke="#EB088A" stroke-width="1.4" fill="none"
+        stroke-dasharray="3 5" opacity="0.5"/>
+
+  <!-- ── The transcript, read backwards ─────────────────────────────── -->
+
+  <use href="#timeline" stroke="#48C0D9" stroke-width="1.8" fill="none"
+       stroke-linecap="round" opacity="0.5"/>
+
+  <!-- Arrowhead pointing back through the session -->
+  <polyline points="66,143 55,150 66,157" fill="none" stroke="#48C0D9"
+            stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+            opacity="0.85"/>
+
+  <!-- Verified steps -->
+  <circle cx="84"  cy="150" r="3.2" fill="#48C0D9" filter="url(#softglow)" opacity="0.8"/>
+  <circle cx="116" cy="150" r="3.2" fill="#313CFF" filter="url(#softglow)" opacity="0.8"/>
+  <circle cx="188" cy="150" r="3.2" fill="#48C0D9" filter="url(#softglow)" opacity="0.8"/>
+  <circle cx="222" cy="150" r="3.2" fill="#8A25C9" filter="url(#softglow)" opacity="0.8"/>
+  <circle cx="256" cy="150" r="3.2" fill="#48C0D9" filter="url(#softglow)" opacity="0.8"/>
+
+  <!-- The unsupported step -->
+  <circle cx="152" cy="150" r="10" fill="none" stroke="#EB088A" stroke-width="1.4">
+    <animate attributeName="r"       values="7;15;7"      dur="2.4s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.7;0;0.7"   dur="2.4s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="152" cy="150" r="5" fill="#EB088A" filter="url(#glow)">
+    <animate attributeName="opacity" values="1;0.4;1" dur="2.4s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Tracer: sweeps right to left, the direction backcheck actually reads -->
+  <circle r="4.5" fill="#48C0D9" filter="url(#tracerglow)">
+    <animateMotion dur="3.6s" repeatCount="indefinite" rotate="none">
+      <mpath href="#timeline"/>
+    </animateMotion>
+    <animate attributeName="opacity"
+             values="0;0.9;0.9;0.9;0"
+             keyTimes="0;0.07;0.5;0.88;1"
+             dur="3.6s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- ── Wordmark ───────────────────────────────────────────────────── -->
+  <text x="345" y="112"
+        font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
+        font-size="72" font-weight="800" letter-spacing="-3.5"
+        fill="url(#tg)">backcheck</text>
+
+  <text x="347" y="142"
+        font-family="'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
+        font-size="12.5" font-weight="500" letter-spacing="3.2"
+        fill="#4a4a6a">verify what your agent actually did</text>
+</svg>

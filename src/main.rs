@@ -1,0 +1,211 @@
+//! backcheck — verify what your coding agent actually did.
+
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
+
+use backcheck::{analyse_transcript, hook, report, session, verify};
+
+#[derive(Parser)]
+#[command(
+    name = "backcheck",
+    version,
+    about = "Verify what your coding agent actually did",
+    long_about = "backcheck reads a Claude Code session transcript and checks the agent's claims \
+                  — \"tests pass\", \"committed\", \"created X\" — against the evidence of what it \
+                  actually ran. No model calls: every verdict comes from recorded output."
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    /// Analyse a specific transcript instead of the most recent session.
+    #[arg(long, short = 'f', global = true, value_name = "FILE")]
+    transcript: Option<PathBuf>,
+
+    /// Emit machine-readable JSON.
+    #[arg(long, global = true)]
+    json: bool,
+
+    /// Show supported claims as well as problems.
+    #[arg(long, short, global = true)]
+    verbose: bool,
+
+    /// Also consult the working tree and git repository, not just the transcript.
+    #[arg(long, global = true)]
+    live: bool,
+
+    /// Never use colour.
+    #[arg(long, global = true)]
+    no_color: bool,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Check the most recent session for this directory (the default).
+    Check {
+        /// Check the newest session across all projects, not just this directory.
+        #[arg(long)]
+        any_project: bool,
+    },
+    /// Run as a Claude Code Stop hook, reading its payload from stdin.
+    Hook {
+        /// Report findings without blocking the turn.
+        #[arg(long)]
+        no_block: bool,
+    },
+    /// Add backcheck to Claude Code's Stop hooks.
+    Install {
+        /// Install for every project (~/.claude/settings.json) instead of this one.
+        #[arg(long)]
+        global: bool,
+        /// Report findings without blocking the turn.
+        #[arg(long)]
+        no_block: bool,
+    },
+    /// Remove backcheck from Claude Code's Stop hooks.
+    Uninstall {
+        /// Remove the global installation.
+        #[arg(long)]
+        global: bool,
+    },
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    match run(&cli) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("backcheck: {e:#}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run(cli: &Cli) -> Result<ExitCode> {
+    match &cli.command {
+        Some(Command::Hook { no_block }) => run_hook(cli, *no_block),
+        Some(Command::Install { global, no_block }) => {
+            let path = hook::install(*global, !*no_block)?;
+            println!("backcheck installed as a Stop hook in {}", path.display());
+            println!(
+                "{}",
+                if *no_block {
+                    "It will report unverified claims without blocking."
+                } else {
+                    "When a claim is not supported, Claude will be asked to resolve it before finishing."
+                }
+            );
+            println!(
+                "\nRun `backcheck uninstall{}` to remove it.",
+                if *global { " --global" } else { "" }
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Command::Uninstall { global }) => {
+            match hook::uninstall(*global)? {
+                Some(p) => println!("backcheck removed from {}", p.display()),
+                None => println!("backcheck was not installed there; nothing to do."),
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(Command::Check { any_project }) => run_check(cli, *any_project),
+        None => run_check(cli, false),
+    }
+}
+
+fn run_check(cli: &Cli, any_project: bool) -> Result<ExitCode> {
+    let path = match &cli.transcript {
+        Some(p) => p.clone(),
+        None => {
+            let cwd = std::env::current_dir().ok();
+            let scoped = if any_project { None } else { cwd.as_deref() };
+            session::latest_transcript(scoped).or_else(|e| {
+                // A session started elsewhere is better than no answer at all.
+                if any_project {
+                    Err(e)
+                } else {
+                    session::latest_transcript(None).map_err(|_| e)
+                }
+            })?
+        }
+    };
+
+    let opts = verify::Options {
+        live: cli.live,
+        cwd: std::env::current_dir()
+            .ok()
+            .map(|p| p.display().to_string()),
+    };
+    let report = analyse_transcript(&path, &opts)
+        .with_context(|| format!("analysing {}", path.display()))?;
+
+    if cli.json {
+        println!("{}", report::to_json(&report));
+    } else {
+        print!(
+            "{}",
+            report::to_terminal(&report, use_color(cli), cli.verbose)
+        );
+    }
+
+    Ok(if report.has_problems() {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+fn run_hook(cli: &Cli, no_block: bool) -> Result<ExitCode> {
+    let input = hook::HookInput::from_stdin()?;
+
+    let path = match input.transcript().or_else(|| cli.transcript.clone()) {
+        Some(p) => p,
+        None => match session::latest_transcript(None) {
+            Ok(p) => p,
+            // A hook that cannot find a transcript must not break the user's session.
+            Err(_) => {
+                println!("{}", hook::allow_output());
+                return Ok(ExitCode::SUCCESS);
+            }
+        },
+    };
+
+    let opts = verify::Options {
+        live: cli.live,
+        cwd: input.cwd.clone(),
+    };
+
+    // This runs inside someone's editing session. A malformed transcript or a bug in the analysis
+    // must degrade to "say nothing and let the turn finish", never to a broken session.
+    let analysed = std::panic::catch_unwind(|| analyse_transcript(&path, &opts));
+    let report = match analysed {
+        Ok(Ok(r)) => r,
+        _ => {
+            println!("{}", hook::allow_output());
+            return Ok(ExitCode::SUCCESS);
+        }
+    };
+
+    // Blocking again while the model is already answering a block risks a loop.
+    if report.has_problems() && !no_block && !input.stop_hook_active {
+        println!("{}", hook::block_output(&report::to_hook_reason(&report)));
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    if report.has_problems() {
+        eprintln!("{}", report::to_terminal(&report, false, false));
+    }
+    println!("{}", hook::allow_output());
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Respect `NO_COLOR`, `--no-color`, and non-terminal output.
+fn use_color(cli: &Cli) -> bool {
+    if cli.no_color || std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    std::env::var_os("TERM").is_some_and(|t| t != "dumb")
+}

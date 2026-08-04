@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-features
+
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --all-features
+
+  msrv:
+    name: minimum supported Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.82.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-features
+
+  end-to-end:
+    name: end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+
+      # The demo transcript contains an unsupported claim, so exit code 1 is correct here.
+      - name: reports problems in the demo session
+        run: |
+          set +e
+          ./target/release/backcheck -f tests/fixtures/demo.jsonl --no-color
+          code=$?
+          set -e
+          test "$code" -eq 1 || { echo "expected exit 1, got $code"; exit 1; }
+
+      - name: emits valid JSON
+        run: |
+          ./target/release/backcheck -f tests/fixtures/demo.jsonl --json \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['summary']['problems'] >= 1, d"
+
+      - name: hook mode never breaks a session
+        run: |
+          # A payload pointing at a file that does not exist must still emit valid hook JSON.
+          echo '{"session_id":"x","transcript_path":"/nonexistent.jsonl","stop_hook_active":false}' \
+            | ./target/release/backcheck hook \
+            | python3 -c "import json,sys; json.load(sys.stdin)"
+
+      - name: install is idempotent and preserves settings
+        run: |
+          mkdir -p .claude
+          echo '{"model":"opus"}' > .claude/settings.json
+          ./target/release/backcheck install
+          ./target/release/backcheck install
+          python3 - <<'PY'
+          import json
+          s = json.load(open('.claude/settings.json'))
+          assert s['model'] == 'opus', 'existing settings must survive'
+          stop = s['hooks']['Stop']
+          assert len(stop) == 1, f'installed twice: {stop}'
+          PY
+          ./target/release/backcheck uninstall
