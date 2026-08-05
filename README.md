@@ -211,7 +211,7 @@ Verification only works for commands `backcheck` can read the result of, so the 
 | **Tests** | pytest · unittest · tox · nox · cargo test · cargo nextest · go test · jest · vitest · mocha · ava · bun test · npm / yarn / pnpm test · rspec · phpunit · dotnet test · maven · gradle · ctest · make test |
 | **CI** | `gh pr checks` · `gh run list` · `gh run view` · `gh run watch` |
 | **Types** | mypy · pyright · tsc · cargo check |
-| **Lint** | ruff · eslint · clippy · flake8 · pylint · golangci-lint · biome · pre-commit · import-linter · npm lint · cargo fmt · gofmt |
+| **Lint** | ruff · eslint · clippy · flake8 · pylint · golangci-lint · biome · shellcheck · pre-commit · import-linter · npm lint · cargo fmt · gofmt |
 | **Build** | cargo build · go build · npm / vite / Next build · `python -m build` · docker build · mkdocs · sphinx |
 
 It sees through the wrappers these arrive in: `uv run`, `poetry run`, `npx`, `pnpm exec`,

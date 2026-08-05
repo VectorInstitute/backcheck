@@ -183,10 +183,13 @@ pub(crate) fn parse_outcome(
             if diagnostic.is_match(output) {
                 let evidence = output
                     .lines()
-                    .rev()
-                    .find(|line| diagnostic.is_match(line))
+                    .find(|line| diagnostic.is_match(line) && !line.contains("shellcheck.net"))
                     .map(|line| line.trim().to_string());
-                return (Outcome::Failed, None, None, evidence);
+                let count = output
+                    .lines()
+                    .filter(|line| diagnostic.is_match(line) && !line.contains("shellcheck.net"))
+                    .count() as u32;
+                return (Outcome::Failed, None, Some(count), evidence);
             }
             (Outcome::Unknown, None, None, None)
         }

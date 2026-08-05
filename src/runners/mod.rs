@@ -407,10 +407,12 @@ For more information:\n\
   https://www.shellcheck.net/wiki/SC2086 -- Double quote to prevent globbing and word splitting.",
         );
         assert_eq!(bad.outcome, Outcome::Failed);
-        assert!(bad
-            .evidence_line
-            .as_deref()
-            .is_some_and(|line| line.contains("SC2086")));
+        let evidence = bad.evidence_line.as_deref().unwrap_or_default();
+        assert!(
+            evidence.contains("SC2086") && !evidence.contains("shellcheck.net"),
+            "evidence should quote the finding, not the wiki URL: {evidence}"
+        );
+        assert_eq!(bad.failed, Some(1));
 
         let ambiguous = one("shellcheck scripts/check.sh", "Checking scripts/check.sh");
         assert_eq!(ambiguous.outcome, Outcome::Unknown);
