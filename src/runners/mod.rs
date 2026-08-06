@@ -391,6 +391,34 @@ mod tests {
     }
 
     #[test]
+    fn shellcheck_pass_fail_and_ambiguous_output() {
+        let ok = one("shellcheck scripts/check.sh", "");
+        assert_eq!(ok.kind, CheckKind::Lint);
+        assert_eq!(ok.runner, "shellcheck");
+        assert_eq!(ok.outcome, Outcome::Passed);
+
+        let bad = one(
+            "shellcheck scripts/check.sh",
+            "In scripts/check.sh line 3:\n\
+echo $name\n\
+     ^---^ SC2086 (info): Double quote to prevent globbing and word splitting.\n\
+\n\
+For more information:\n\
+  https://www.shellcheck.net/wiki/SC2086 -- Double quote to prevent globbing and word splitting.",
+        );
+        assert_eq!(bad.outcome, Outcome::Failed);
+        let evidence = bad.evidence_line.as_deref().unwrap_or_default();
+        assert!(
+            evidence.contains("SC2086") && !evidence.contains("shellcheck.net"),
+            "evidence should quote the finding, not the wiki URL: {evidence}"
+        );
+        assert_eq!(bad.failed, Some(1));
+
+        let ambiguous = one("shellcheck scripts/check.sh", "Checking scripts/check.sh");
+        assert_eq!(ambiguous.outcome, Outcome::Unknown);
+    }
+
+    #[test]
     fn suppressed_failure_is_caveated_only_when_it_could_hide_something() {
         // No readable summary: `|| true` really could be concealing the outcome.
         let hidden = one("pytest -q || true", "");
