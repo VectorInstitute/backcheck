@@ -69,6 +69,27 @@ pub(crate) fn parse_outcome(
             }
             (Outcome::Unknown, None, None, None)
         }
+        "deno test" => {
+            static SUMMARY: OnceLock<Regex> = OnceLock::new();
+            if let Some(c) = find(
+                r"(?m)^(ok|FAILED)\s*\|\s*(\d+) passed\s*\|\s*(\d+) failed\s*\([^)]+\)\s*$",
+                &SUMMARY,
+            ) {
+                let passed: Option<u32> = c[2].parse().ok();
+                let failed: Option<u32> = c[3].parse().ok();
+                let evidence = line_containing(" passed | ");
+                return match (c[1].as_str(), passed, failed) {
+                    (_, Some(passed), Some(failed)) if failed > 0 => {
+                        (Outcome::Failed, Some(passed), Some(failed), evidence)
+                    }
+                    ("ok", Some(passed), Some(0)) if passed > 0 => {
+                        (Outcome::Passed, Some(passed), Some(0), evidence)
+                    }
+                    _ => (Outcome::Unknown, passed, failed, evidence),
+                };
+            }
+            (Outcome::Unknown, None, None, None)
+        }
         "go test" => {
             if output
                 .lines()
