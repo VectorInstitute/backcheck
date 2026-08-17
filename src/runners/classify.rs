@@ -46,6 +46,9 @@ pub fn classify(segment: &str) -> Option<(CheckKind, String)> {
     if lower.starts_with("cargo test") || lower.starts_with("cargo nextest") {
         return Some((CheckKind::Test, "cargo test".into()));
     }
+    if lower.starts_with("deno test") {
+        return Some((CheckKind::Test, "deno test".into()));
+    }
     if lower.starts_with("go test") {
         return Some((CheckKind::Test, "go test".into()));
     }

@@ -312,6 +312,38 @@ mod tests {
     }
 
     #[test]
+    fn deno_test_summary() {
+        let ok = one(
+            "deno test",
+            "running 2 tests from ./example_test.ts\naddition ... ok (0ms)\nsubtraction ... ok (0ms)\n\nok | 2 passed | 0 failed (5ms)",
+        );
+        assert_eq!(ok.outcome, Outcome::Passed);
+        assert_eq!(ok.passed, Some(2));
+        assert_eq!(ok.failed, Some(0));
+        assert_eq!(
+            ok.evidence_line.as_deref(),
+            Some("ok | 2 passed | 0 failed (5ms)")
+        );
+
+        let bad = one(
+            "npx deno test",
+            "running 2 tests from ./example_test.ts\npassing example ... ok (0ms)\nfailing example ... FAILED (0ms)\n\nFAILED | 1 passed | 1 failed (7ms)\n\nerror: Test failed",
+        );
+        assert_eq!(bad.outcome, Outcome::Failed);
+        assert_eq!(bad.passed, Some(1));
+        assert_eq!(bad.failed, Some(1));
+    }
+
+    #[test]
+    fn deno_test_without_a_conclusive_summary_is_unknown() {
+        let no_tests = one("deno test", "ok | 0 passed | 0 failed (0ms)");
+        assert_eq!(no_tests.outcome, Outcome::Unknown);
+
+        let incomplete = one("deno test", "addition ... ok (0ms)");
+        assert_eq!(incomplete.outcome, Outcome::Unknown);
+    }
+
+    #[test]
     fn jest_summary() {
         let bad = one("npx jest", "Tests:       1 failed, 4 passed, 5 total");
         assert_eq!(bad.outcome, Outcome::Failed);
